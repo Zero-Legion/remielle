@@ -1,0 +1,7 @@
+.{
+    // UDP bind address.
+    // Can be overridded by the `-b` option.
+    .bind_address = "127.0.0.1:20501",
+
+    .dummy_cmd = "CJEBHOFBOGJ",
+}

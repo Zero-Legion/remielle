@@ -1,0 +1,149 @@
+const stable_protos: []const []const u8 = &.{
+    "rmpb/cs_proto/head.proto",
+};
+
+pub fn build(b: *Build) void {
+    const rmio = b.createModule(.{ .root_source_file = b.path("rmio/src/root.zig") });
+    const rmcli = b.createModule(.{ .root_source_file = b.path("rmcli/src/root.zig") });
+    const rmcrypt = b.createModule(.{ .root_source_file = b.path("rmcrypt/src/root.zig") });
+
+    const rmpb = b.createModule(.{ .root_source_file = b.path("rmpb/src/root.zig") });
+
+    const host = b.graph.host;
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+
+    const io = b.graph.io;
+    const cwd: Io.Dir = .cwd();
+
+    const rmprotoc = b.addExecutable(.{
+        .name = "rmprotoc",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("rmpb/compiler/main.zig"),
+            .target = host,
+            .optimize = optimize,
+            .single_threaded = true,
+        }),
+    });
+
+    const compile_main_structs = b.addUpdateSourceFiles();
+    const compile_main_descriptors = b.addUpdateSourceFiles();
+    const compile_stable_definitions = b.addUpdateSourceFiles();
+
+    if (cwd.access(io, "rmpb/cs_proto/main.proto", .{ .read = true })) {
+        const rmprotoc_descs_pass = b.addRunArtifact(rmprotoc);
+        rmprotoc_descs_pass.expectExitCode(0);
+        rmprotoc_descs_pass.addArg("-descriptors");
+        rmprotoc_descs_pass.addFileArg(b.path("rmpb/cs_proto/main.proto"));
+
+        compile_main_descriptors.addCopyFileToSource(
+            rmprotoc_descs_pass.captureStdOut(.{ .basename = "pb.main.desc.zig" }),
+            "rmpb/src/pb.main.desc.zig",
+        );
+
+        const rmprotoc_structs_pass = b.addRunArtifact(rmprotoc);
+        rmprotoc_structs_pass.expectExitCode(0);
+        rmprotoc_structs_pass.addArg("-structures");
+        rmprotoc_structs_pass.addFileArg(b.path("rmpb/cs_proto/main.proto"));
+
+        compile_main_structs.addCopyFileToSource(
+            rmprotoc_structs_pass.captureStdOut(.{ .basename = "pb.main.zig" }),
+            "rmpb/src/pb.main.zig",
+        );
+    } else |_| {}
+
+    if (filesReadable(io, cwd, stable_protos)) {
+        const rmprotoc_stable_pass = b.addRunArtifact(rmprotoc);
+        rmprotoc_stable_pass.expectExitCode(0);
+        rmprotoc_stable_pass.addArg("-full");
+
+        for (stable_protos) |sub_path|
+            rmprotoc_stable_pass.addFileArg(b.path(sub_path));
+
+        compile_stable_definitions.addCopyFileToSource(
+            rmprotoc_stable_pass.captureStdOut(.{ .basename = "pb.stable.zig" }),
+            "rmpb/src/pb.stable.zig",
+        );
+    }
+
+    const dpsv = b.addExecutable(.{
+        .name = "remielle-dpsv",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("dpsv/src/main.zig"),
+            .imports = &.{
+                .{ .name = "rmio", .module = rmio },
+                .{ .name = "rmcli", .module = rmcli },
+                .{ .name = "rmcrypt", .module = rmcrypt },
+            },
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    dpsv.root_module.addAnonymousImport("config", .{
+        .root_source_file = b.path("dpsv/config.zon"),
+    });
+
+    const gamesv = b.addExecutable(.{
+        .name = "remielle-gamesv",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("gamesv/src/main.zig"),
+            .imports = &.{
+                .{ .name = "rmio", .module = rmio },
+                .{ .name = "rmcli", .module = rmcli },
+                .{ .name = "rmcrypt", .module = rmcrypt },
+                .{ .name = "rmpb", .module = rmpb },
+            },
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    gamesv.step.dependOn(&compile_main_descriptors.step);
+    gamesv.step.dependOn(&compile_stable_definitions.step);
+
+    gamesv.root_module.addAnonymousImport("config", .{
+        .root_source_file = b.path("gamesv/config.zon"),
+    });
+
+    gamesv.root_module.addAnonymousImport("initial_xorpad", .{
+        .root_source_file = b.path("gamesv/initial_xorpad.bytes"),
+    });
+
+    b.step(
+        "pb",
+        "run a struct generation pass on `main.proto`",
+    ).dependOn(&compile_main_structs.step);
+
+    const serve_dp = b.addRunArtifact(dpsv);
+    const serve_game = b.addRunArtifact(gamesv);
+    if (b.args) |args| {
+        serve_dp.addArgs(args);
+        serve_game.addArgs(args);
+    }
+
+    b.step(
+        "serve-dp",
+        "start the dispatch server",
+    ).dependOn(&serve_dp.step);
+
+    b.step(
+        "serve-game",
+        "start the game server",
+    ).dependOn(&serve_game.step);
+
+    b.installArtifact(dpsv);
+    b.installArtifact(gamesv);
+}
+
+fn filesReadable(io: Io, dir: Io.Dir, path_list: []const []const u8) bool {
+    for (path_list) |sub_path|
+        dir.access(io, sub_path, .{ .read = true }) catch return false;
+
+    return true;
+}
+
+const Io = std.Io;
+const Build = std.Build;
+
+const std = @import("std");

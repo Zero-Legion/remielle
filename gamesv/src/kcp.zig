@@ -1,0 +1,86 @@
+pub const Control = @import("kcp/Control.zig");
+pub const Header = @import("kcp/Header.zig");
+pub const Server = @import("kcp/Server.zig");
+
+pub const mtu: usize = 1200;
+pub const mss: usize = mtu - Header.size;
+
+pub const ConvId = enum(u32) {
+    none = 0,
+    _,
+
+    pub const Counter = struct {
+        count: u32,
+
+        pub const init: Counter = .{ .count = 1 };
+
+        pub fn next(c: *Counter) ConvId {
+            defer c.count +%= 1;
+
+            if (c.count == 0) {
+                @branchHint(.cold);
+                c.count +%= 1;
+            }
+
+            return @enumFromInt(c.count);
+        }
+    };
+
+    pub fn toInt(conv: ConvId) u32 {
+        std.debug.assert(conv != .none);
+        return @intFromEnum(conv);
+    }
+};
+
+pub const Token = enum(u32) {
+    _,
+
+    const Parameters = packed struct {
+        random: u64,
+        conv_id: ConvId,
+        addr: u32,
+    };
+
+    pub fn init(parameters: *const Parameters) Token {
+        return @enumFromInt(std.hash.Crc32.hash(@as([]const u8, @ptrCast(parameters))[0..16]));
+    }
+
+    pub inline fn downgrade(token: Token) Unchecked {
+        return @enumFromInt(@intFromEnum(token));
+    }
+
+    /// An unchecked, just-received-from-the-wire token value.
+    pub const Unchecked = enum(u32) {
+        _,
+
+        pub fn upgrade(unchecked: Unchecked, random: u64, user_addr: u32, user_conv: ConvId) ?Token {
+            const actual: Token = .init(&.{
+                .random = random,
+                .conv_id = user_conv,
+                .addr = user_addr,
+            });
+
+            return if (@intFromEnum(actual) == @intFromEnum(unchecked))
+                actual
+            else
+                null;
+        }
+    };
+};
+
+pub const Timeval = packed struct {
+    milliseconds: u32,
+
+    pub const zero: Timeval = .{ .milliseconds = 0 };
+
+    pub fn fromTimestamp(t: Io.Timestamp) Timeval {
+        return .{ .milliseconds = @truncate(@as(u64, @bitCast(t.toMilliseconds()))) };
+    }
+
+    pub fn toTimestamp(tv: Timeval) Io.Timestamp {
+        return .{ .nanoseconds = @as(i96, tv.milliseconds) * std.time.ns_per_ms };
+    }
+};
+
+const Io = std.Io;
+const std = @import("std");
