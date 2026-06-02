@@ -3,11 +3,18 @@ const log = std.log.scoped(.@"remielle-dpsv");
 const buffer_size: usize = 8192;
 const accept_timeout: Io.Duration = .fromSeconds(1);
 
-pub fn listen(io: Io, data: *const Data, slots: []Slot, address: net.IpAddress) u8 {
-    var storage: Slot.Storage = .init(slots);
+pub fn listen(arena: Allocator, n_slots: usize, data: *const Data, address: *const posix.Sockaddr) u8 {
+    var storage = Slot.Storage.initAlloc(arena, n_slots) catch
+        fatal("failed to allocate {d} slots", .{n_slots});
 
-    var server = address.listen(io, .{ .reuse_address = true }) catch |err| switch (err) {
-        error.Canceled => unreachable,
+    const listen_fd = posix.socket(.INET, .init(.STREAM, .flags(.{ .NONBLOCK, .CLOEXEC })), .TCP) catch |err|
+        fatal("socket: {t}", .{err});
+
+    defer posix.close(listen_fd);
+
+    posix.setsockopt(listen_fd, .SOCKET, .REUSEADDR, 1);
+
+    posix.bind(listen_fd, address) catch |err| switch (err) {
         error.AddressInUse => {
             log.err(
                 "the address {f} is already in use; another instance of this server might be already running",
@@ -15,198 +22,236 @@ pub fn listen(io: Io, data: *const Data, slots: []Slot, address: net.IpAddress) 
             );
             return 1;
         },
-        else => |e| {
-            log.err("listen failed: {t}", .{e});
-            return 1;
-        },
+        else => |e| fatal("bind: {t}", .{e}),
     };
 
-    defer server.deinit(io);
+    posix.listen(listen_fd, 100) catch |err| fatal("listen: {t}", .{err});
+
+    storage.pollfds[n_slots] = .{
+        .fd = listen_fd,
+        .events = posix.POLL.IN,
+        .revents = 0,
+    };
 
     while (true) {
-        const stream = server.accept(io) catch |err| switch (err) {
-            error.SystemResources,
-            error.ProcessFdQuotaExceeded,
-            error.SystemFdQuotaExceeded,
-            => {
-                io.sleep(accept_timeout, .awake) catch |sleep_err| switch (sleep_err) {
-                    error.Canceled => unreachable,
+        var n_events = posix.poll(storage.pollfds, -1) catch |err| fatal("poll: {t}", .{err});
+        var pollfd_i: usize = 0;
+
+        events: while (n_events != 0 and pollfd_i != storage.pollfds.len) : (pollfd_i += 1) {
+            const pollfd = &storage.pollfds[pollfd_i];
+            if (pollfd.revents == 0) continue;
+            n_events -= 1;
+
+            if (pollfd_i == n_slots) {
+                while (true) {
+                    var client_addr: posix.Sockaddr = .{ .in = std.mem.zeroes(posix.Sockaddr.In) };
+                    const client_fd = posix.accept(
+                        listen_fd,
+                        &client_addr,
+                        .flags(.{ .CLOEXEC, .NONBLOCK }),
+                    ) catch |err| switch (err) {
+                        error.WouldBlock => continue :events,
+                        else => |e| {
+                            log.err("accept: {t}", .{e});
+                            continue :events;
+                        },
+                    };
+
+                    log.debug("new client from {f}", .{client_addr});
+
+                    const slot_index = switch (storage.free_list_head) {
+                        .none => evict: {
+                            var earliest_ns: i96 = std.math.maxInt(i96);
+                            var index: usize = std.math.maxInt(usize);
+
+                            for (storage.slots, 0..) |slot, i| if (slot.activity_time_ns < earliest_ns) {
+                                earliest_ns = slot.activity_time_ns;
+                                index = i;
+                            };
+
+                            log.debug("evicted connection at slot #{d}", .{index});
+                            posix.close(storage.slots[index].fd);
+
+                            break :evict index;
+                        },
+                        _ => |index| occupy: {
+                            const slot = &storage.slots[index.toInt()];
+                            storage.free_list_head = slot.free_list_node;
+                            slot.free_list_node = .none;
+
+                            break :occupy index.toInt();
+                        },
+                    };
+
+                    const slot = &storage.slots[slot_index];
+
+                    slot.* = .{
+                        .fd = client_fd,
+                        .state = .{ .reading = .{
+                            .buffer = undefined,
+                            .end = 0,
+                        } },
+                        .activity_time_ns = posix.timespecToNs(posix.clock_gettime(.MONOTONIC) catch unreachable),
+                        .free_list_node = .none,
+                    };
+
+                    serve(data, slot) catch |err| switch (err) {
+                        error.WouldBlock => {},
+                        else => |e| {
+                            log.err("serve failed: {t}", .{e});
+                            posix.close(slot.fd);
+                            storage.removeAt(slot_index);
+                        },
+                    };
+
+                    storage.pollfds[slot_index] = .{
+                        .fd = slot.fd,
+                        .events = switch (slot.state) {
+                            .reading => posix.POLL.IN,
+                            .writing => posix.POLL.OUT,
+                            .done => {
+                                posix.close(slot.fd);
+                                storage.removeAt(slot_index);
+                                continue;
+                            },
+                        },
+                        .revents = 0,
+                    };
+                }
+            } else {
+                const slot_index = pollfd_i;
+                const slot = &storage.slots[slot_index];
+
+                serve(data, slot) catch |err| switch (err) {
+                    error.WouldBlock => {},
+                    else => |e| {
+                        log.err("serve failed: {t}", .{e});
+                        posix.close(slot.fd);
+                        storage.removeAt(slot_index);
+                    },
                 };
 
-                continue;
-            },
-
-            error.Canceled => unreachable,
-
-            else => |e| {
-                log.err("accept failed: {t}", .{e});
-                continue;
-            },
-        };
-
-        // In most cases, this will be used in a single-threaded context.
-        // However, we will be fallbacking to std.Io.Threaded when our Io implementation is unavailable,
-        // considering a very little time window for an exclusive access, this is fine.
-        while (!storage.mutex.tryLock())
-            std.atomic.spinLoopHint();
-
-        const slot_index = switch (storage.free_list_head) {
-            .none => evict: {
-                var earliest: Io.Timestamp = .{ .nanoseconds = std.math.maxInt(i96) };
-                var index: usize = std.math.maxInt(usize);
-
-                for (storage.slots, 0..) |slot, i| switch (slot.state) {
-                    .complete => {
-                        index = i;
-                        break;
+                storage.pollfds[slot_index] = .{
+                    .fd = slot.fd,
+                    .events = switch (slot.state) {
+                        .reading => posix.POLL.IN,
+                        .writing => posix.POLL.OUT,
+                        .done => {
+                            posix.close(slot.fd);
+                            storage.removeAt(slot_index);
+                            continue;
+                        },
                     },
-                    .active => if (slot.activity_time.nanoseconds < earliest.nanoseconds) {
-                        earliest = slot.activity_time;
-                        index = i;
-                    },
-                } else {
-                    log.debug("evicted connection at slot #{d}", .{index});
-                }
-
-                break :evict index;
-            },
-            _ => |index| occupy: {
-                const slot = &storage.slots[index.toInt()];
-                storage.free_list_head = slot.free_list_node;
-                slot.free_list_node = .none;
-
-                break :occupy index.toInt();
-            },
-        };
-
-        const slot = &storage.slots[slot_index];
-
-        // Regardless of the way of allocation,
-        // call `cancel` to free any resources associated
-        // with this future.
-        slot.future.cancel(io);
-
-        storage.mutex.unlock();
-
-        slot.* = .{
-            .state = .active,
-            .activity_time = .now(io, .awake),
-            .free_list_node = .none,
-            .future = undefined,
-        };
-
-        slot.future = io.concurrent(
-            serve,
-            .{ io, data, stream, &storage, slot_index },
-        ) catch |err| switch (err) {
-            error.ConcurrencyUnavailable => {
-                stream.close(io);
-
-                // Back to the free list
-
-                while (!storage.mutex.tryLock()) {}
-                defer storage.mutex.unlock();
-
-                slot.free_list_node = storage.free_list_head;
-                storage.free_list_head = @enumFromInt(slot_index);
-
-                continue;
-            },
-        };
+                    .revents = 0,
+                };
+            }
+        }
     }
 
     return 0;
 }
 
-fn serve(
-    io: Io,
-    data: *const Data,
-    stream: net.Stream,
-    storage: *Slot.Storage,
-    index: usize,
-) void {
-    const slot = &storage.slots[index];
-    defer stream.close(io);
+fn serve(data: *const Data, slot: *Slot) !void {
+    slot.activity_time_ns = posix.timespecToNs(posix.clock_gettime(.MONOTONIC) catch unreachable);
 
-    log.debug("new connection from {f}", .{stream.socket.address});
-    defer log.debug("client from {f} disconnected", .{stream.socket.address});
+    while (true)
+        switch (slot.state) {
+            .reading => |*read| {
+                var iov: posix.iovec = .{
+                    .base = (&read.buffer).ptr[read.end..],
+                    .len = read.buffer.len - read.end,
+                };
 
-    defer recycle: {
-        // Put our slot to the free list
+                var header: posix.msghdr = .{
+                    .name = null,
+                    .namelen = 0,
+                    .iov = (&iov)[0..1],
+                    .iovlen = 1,
+                    .control = null,
+                    .controllen = 0,
+                    .flags = 0,
+                };
 
-        io.checkCancel() catch
-            // This function is exitting due to cancelation,
-            // we don't have to put ourselves to the free_list
-            // because the accept loop has already reclaimed this slot.
-            break :recycle;
+                const n_read = try posix.recvmsg(slot.fd, &header, 0);
 
-        slot.state = .complete;
+                if (n_read == 0) {
+                    slot.state = .done;
+                    return;
+                }
 
-        while (!storage.mutex.tryLock()) {
-            std.atomic.spinLoopHint();
-            io.checkCancel() catch {
-                // We've got canceled while waiting for a lock.
-                // This means that the accept loop has evicted this connection,
-                // although we're already done, we weren't fast enough to
-                // put ourselves into the free list. In this case, it doesn't matter anymore.
-                break :recycle;
-            };
-        }
+                read.end += @truncate(n_read);
 
-        defer storage.mutex.unlock();
+                const buffer = read.buffer[0..read.end];
+                const request_line_len = std.mem.findScalar(u8, buffer, '\r') orelse continue;
 
-        slot.free_list_node = storage.free_list_head;
-        storage.free_list_head = @enumFromInt(@as(u32, @intCast(index)));
-    }
+                const request_line = http.RequestLine.parse(buffer[0..request_line_len]) catch |err| {
+                    log.debug("failed to parse request: {t}", .{err});
+                    return;
+                };
 
-    var recv_buffer: [8192]u8 = undefined;
-    var reader = stream.reader(io, &recv_buffer);
+                var result = routes.process(data, &request_line);
 
-    const request_line_raw = reader.interface.takeDelimiterInclusive('\r') catch |err| switch (err) {
-        error.EndOfStream, error.StreamTooLong => return,
-        error.ReadFailed => switch (reader.err.?) {
-            error.Canceled => {
-                io.recancel();
-                return;
+                if (!request_line.method.hasResponseBody()) {
+                    result.body = null;
+                }
+
+                var iovecs: [2]posix.iovec_const = undefined;
+                const count = result.toVecs(&iovecs);
+
+                slot.state = .{ .writing = .{
+                    .header = undefined,
+                    .iovecs = iovecs,
+                } };
+
+                slot.state.writing.header = .{
+                    .name = null,
+                    .namelen = 0,
+                    .iov = &slot.state.writing.iovecs,
+                    .iovlen = count,
+                    .control = null,
+                    .controllen = 0,
+                    .flags = 0,
+                };
             },
-            else => return,
-        },
-    };
+            .writing => |*write| {
+                const header = &write.header;
+                var n_write = try posix.sendmsg(slot.fd, header, 0);
 
-    const request_line = http.RequestLine.parse(request_line_raw) catch |err| {
-        log.debug("failed to parse request from {f}: {t}", .{ stream.socket.address, err });
-        return;
-    };
+                while (n_write >= header.iov[0].len) {
+                    n_write -= header.iov[0].len;
+                    header.iov = header.iov[1..];
+                    header.iovlen -= 1;
 
-    var result = routes.process(data, &request_line);
+                    if (header.iovlen == 0) {
+                        slot.state = .done;
+                        return;
+                    }
+                }
 
-    if (!request_line.method.hasResponseBody()) {
-        result.body = null;
-    }
-
-    var vecs_buffer: [2][]const u8 = undefined;
-    const vecs = result.toVecs(&vecs_buffer);
-
-    // We're at "sending" state at this point, block the cancelation.
-    // The `send` operation should complete instantly, unless zerocopy is used.
-    const old_cancel_protection = io.swapCancelProtection(.blocked);
-    defer _ = io.swapCancelProtection(old_cancel_protection);
-
-    slot.activity_time = .now(io, .awake);
-
-    var writer = stream.writer(io, &.{});
-    writer.interface.writeVecAll(vecs) catch {};
+                // constCast: `header.iov` is a pointer to `write.iovecs`
+                @constCast(header.iov)[0].base += n_write;
+                @constCast(header.iov)[0].len -= n_write;
+            },
+            .done => unreachable,
+        };
 }
 
 pub const Slot = struct {
+    fd: posix.socket_t,
     state: State,
-    activity_time: Io.Timestamp,
-    future: Io.Future(void),
+    activity_time_ns: i96,
     free_list_node: OptionalIndex,
 
-    const State = enum(u1) {
-        active,
-        complete,
+    const State = union(enum) {
+        reading: struct {
+            buffer: [8192]u8,
+            end: u32,
+        },
+        writing: struct {
+            header: posix.msghdr_const,
+            iovecs: [2]posix.iovec_const,
+        },
+        done: void,
     };
 
     const OptionalIndex = enum(u32) {
@@ -222,25 +267,51 @@ pub const Slot = struct {
     const Storage = struct {
         mutex: std.atomic.Mutex,
         slots: []Slot,
+        pollfds: []posix.pollfd,
         free_list_head: OptionalIndex,
 
-        pub fn init(slots: []Slot) Storage {
-            for (slots[0 .. slots.len - 1], 1..) |*slot, i| {
+        pub fn init(slots: []Slot, pollfds: []posix.pollfd) Storage {
+            debug.assert(slots.len == pollfds.len - 1);
+
+            for (slots[0 .. slots.len - 1], 1..) |*slot, i|
                 slot.free_list_node = @enumFromInt(i);
-                slot.future.any_future = null; // `cancel` will return immediately
-            }
 
             slots[slots.len - 1].free_list_node = .none;
-            slots[slots.len - 1].future.any_future = null;
+
+            for (pollfds) |*pollfd|
+                pollfd.fd = -1;
 
             return .{
                 .mutex = .unlocked,
                 .slots = slots,
+                .pollfds = pollfds,
                 .free_list_head = @enumFromInt(0),
             };
         }
+
+        pub fn initAlloc(arena: Allocator, n: usize) Allocator.Error!Storage {
+            return .init(try arena.alloc(Slot, n), try arena.alloc(posix.pollfd, n + 1));
+        }
+
+        pub fn removeAt(s: *Storage, index: usize) void {
+            s.pollfds[index] = .{
+                .fd = -1,
+                .events = 0,
+                .revents = 0,
+            };
+
+            s.slots[index].free_list_node = s.free_list_head;
+            s.free_list_head = @enumFromInt(index);
+        }
     };
 };
+
+fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
+    log.err(fmt, args);
+    std.process.exit(1);
+}
+
+const posix = rmio.posix;
 
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
@@ -252,4 +323,5 @@ const Data = @import("Data.zig");
 const http = @import("http.zig");
 const routes = @import("routes.zig");
 
+const rmio = @import("rmio");
 const std = @import("std");

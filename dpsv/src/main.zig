@@ -28,31 +28,16 @@ pub fn main(init: Init.Minimal) u8 {
         .{ options_err, args[0], rmcli.opt.Usage(Options) },
     );
 
-    const listen_address = net.IpAddress.parseLiteral(options.listen_address) catch |err| {
+    const listen_address = posix.Sockaddr.parseIp4(options.listen_address) catch |err| {
         log.err("bad listen address specified: {t}", .{err});
         return 1;
     };
-
-    var io_impl = if (rmio.RemiellIo.supported)
-        rmio.RemiellIo.init(gpa, .{ .coroutines = options.slots, .stack_size = 1024 * 32 }) catch |err|
-            fatal("failed to init I/O implementation: {t}", .{err})
-    else
-        std.Io.Threaded.init(gpa, .{});
-
-    defer io_impl.deinit();
-    const io = io_impl.io();
-
-    const slots = gpa.alloc(app.Slot, options.slots) catch |err| switch (err) {
-        error.OutOfMemory => fatal("failed to allocate {d} connection slots", .{options.slots}),
-    };
-
-    defer if (is_debug) gpa.free(slots);
 
     const data = Data.build(arena.allocator()) catch |err| switch (err) {
         error.OutOfMemory => fatal("failed to build static responses", .{}),
     };
 
-    return app.listen(io, &data, slots, listen_address);
+    return app.listen(arena.allocator(), options.slots, &data, &listen_address);
 }
 
 inline fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
@@ -64,6 +49,7 @@ const is_debug = builtin.mode == .Debug;
 
 const Init = std.process.Init;
 
+const posix = rmio.posix;
 const heap = std.heap;
 const net = std.Io.net;
 const exit = std.process.exit;

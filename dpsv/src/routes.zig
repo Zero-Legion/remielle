@@ -18,11 +18,20 @@ pub const Result = struct {
         };
     }
 
-    pub fn toVecs(result: *const Result, vecs_buffer: *[2][]const u8) [][]const u8 {
-        vecs_buffer[0] = result.status_line;
-        vecs_buffer[1] = result.body orelse return vecs_buffer[0..1];
+    pub fn toVecs(result: *const Result, iovecs: *[2]posix.iovec_const) u2 {
+        iovecs[0] = .{
+            .base = result.status_line.ptr,
+            .len = result.status_line.len,
+        };
 
-        return vecs_buffer;
+        const body = result.body orelse return 1;
+
+        iovecs[1] = .{
+            .base = body.ptr,
+            .len = body.len,
+        };
+
+        return 2;
     }
 };
 
@@ -77,8 +86,10 @@ pub fn process(data: *const Data, request: *const http.RequestLine) Result {
 }
 
 const fmt = std.fmt;
+const posix = rmio.posix;
 
 const http = @import("http.zig");
 const Data = @import("Data.zig");
+const rmio = @import("rmio");
 
 const std = @import("std");
