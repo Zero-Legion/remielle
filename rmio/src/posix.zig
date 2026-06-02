@@ -234,7 +234,19 @@ pub const AcceptError = error{
 pub fn accept(fd: socket_t, addr: *Sockaddr, flags: SOCK.Flags) AcceptError!socket_t {
     var addrlen: socklen_t = addr.len();
 
-    // TODO: use accept4(2) where applicable
+    if (@hasDecl(sys, "accept4")) {
+        const rc = sys.accept4(fd, addr.rawMut(), &addrlen, @intFromEnum(flags));
+        return switch (sys.errno(rc)) {
+            .SUCCESS => @intCast(rc),
+            .AGAIN => error.WouldBlock,
+            .CONNABORTED => error.ConnectionAborted,
+            .MFILE => error.ProcessFdQuotaExceeded,
+            .NFILE => error.SystemFdQuotaExceeded,
+            .PERM => error.BlockedByFirewall,
+            .PROTO => error.ProtocolError,
+            else => |e| unexpectedErrno(e),
+        };
+    }
 
     const accept_rc = sys.accept(fd, addr.rawMut(), &addrlen);
     const accepted_fd: socket_t = switch (sys.errno(accept_rc)) {
