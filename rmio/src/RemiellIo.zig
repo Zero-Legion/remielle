@@ -1,3 +1,5 @@
+//! Deprecated. Use `rmio.posix` instead.
+
 impl: Impl,
 arena: std.heap.ArenaAllocator,
 coro_storage: Coroutine.Storage,
