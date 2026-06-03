@@ -21,14 +21,14 @@ pub const Result = struct {
     pub fn toVecs(result: *const Result, iovecs: *[2]posix.iovec_const) u2 {
         iovecs[0] = .{
             .base = result.status_line.ptr,
-            .len = result.status_line.len,
+            .len = @intCast(result.status_line.len),
         };
 
         const body = result.body orelse return 1;
 
         iovecs[1] = .{
             .base = body.ptr,
-            .len = body.len,
+            .len = @intCast(body.len),
         };
 
         return 2;

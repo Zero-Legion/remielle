@@ -56,9 +56,19 @@ pub const SocketError = error{
 
 pub const socket_t = sys.fd_t;
 
+pub const invalid_fd: socket_t = switch (native_os) {
+    .windows => @ptrFromInt(std.math.maxInt(usize)),
+    else => -1,
+};
+
 pub fn socket(af: AF, sock: SOCK, ipproto: IPPROTO) SocketError!socket_t {
-    const rc = sys.socket(@intFromEnum(af), @intFromEnum(sock), @intFromEnum(ipproto));
-    return switch (sys.errno(rc)) {
+    const socket_type = if (is_windows)
+        @intFromEnum(sock) & ~@as(u32, sys.SOCK.NONBLOCK | sys.SOCK.CLOEXEC)
+    else
+        @intFromEnum(sock);
+
+    const rc = sys.socket(@intFromEnum(af), socket_type, @intFromEnum(ipproto));
+    return if (!is_windows) switch (sys.errno(rc)) {
         .SUCCESS => @intCast(rc),
         .ACCES => error.AccessDenied,
         .MFILE => error.ProcessFdQuotaExceeded,
@@ -66,7 +76,30 @@ pub fn socket(af: AF, sock: SOCK, ipproto: IPPROTO) SocketError!socket_t {
         .NOBUFS, .NOMEM => error.SystemResources,
         .PROTONOSUPPORT => error.ProtocolNotSupported,
         else => |e| unexpectedErrno(e),
-    };
+    } else if (rc == invalid_fd) switch (sys.WSAGetLastError()) {
+        .WSAEACCES => error.AccessDenied,
+        .WSAEMFILE => error.ProcessFdQuotaExceeded,
+        .WSAENOBUFS => error.SystemResources,
+        .WSAEPROTONOSUPPORT => error.ProtocolNotSupported,
+        .WSANOTINITIALISED => startup: {
+            var wsa_data: sys.WSADATA = undefined;
+            break :startup switch (sys.WSAStartup(0x0202, &wsa_data)) {
+                // Retry
+                0 => socket(af, sock, ipproto),
+
+                else => |error_rc| unexpectedErrno(
+                    @as(sys.WinsockError, @enumFromInt(@as(u16, @intCast(error_rc)))),
+                ),
+            };
+        },
+        else => |e| unexpectedErrno(e),
+    } else if (sock.hasFlag(.NONBLOCK)) nonblocking: {
+        var argp: u32 = 1;
+        if (sys.ioctlsocket(rc, sys.FIONBIO, &argp) == sys.SOCKET_ERROR)
+            unexpectedErrno(sys.WSAGetLastError());
+
+        break :nonblocking rc;
+    } else rc;
 }
 
 pub const Sockaddr = union(enum) {
@@ -144,12 +177,19 @@ pub const BindError = error{
 };
 
 pub fn bind(fd: socket_t, addr: *const Sockaddr) BindError!void {
-    return switch (sys.errno(sys.bind(fd, addr.raw(), addr.len()))) {
+    const rc = sys.bind(fd, addr.raw(), addr.len());
+    return if (!is_windows) switch (sys.errno(rc)) {
         .SUCCESS => {},
         .ACCES => error.AccessDenied,
         .ADDRINUSE => error.AddressInUse,
         .ADDRNOTAVAIL => error.AddressUnavailable,
         .NOMEM => error.SystemResources,
+        else => |e| unexpectedErrno(e),
+    } else if (rc == sys.SOCKET_ERROR) switch (sys.WSAGetLastError()) {
+        .WSAEACCES => error.AccessDenied,
+        .WSAEADDRINUSE => error.AddressInUse,
+        .WSAEADDRNOTAVAIL => error.AddressUnavailable,
+        .WSAENOBUFS => error.SystemResources,
         else => |e| unexpectedErrno(e),
     };
 }
@@ -159,11 +199,15 @@ pub const ListenError = error{
 };
 
 pub fn listen(fd: socket_t, backlog: u31) ListenError!void {
-    return switch (sys.errno(sys.listen(fd, backlog))) {
+    const rc = sys.listen(fd, backlog);
+    return if (!is_windows) switch (sys.errno(rc)) {
         .SUCCESS => {},
         .ADDRINUSE => error.AddressInUse,
         else => |e| unexpectedErrno(e),
-    };
+    } else if (rc == sys.SOCKET_ERROR) switch (sys.WSAGetLastError()) {
+        .WSAEADDRINUSE => error.AddressInUse,
+        else => |e| unexpectedErrno(e),
+    } else {};
 }
 
 pub const SOL = enum(i32) {
@@ -186,20 +230,33 @@ pub fn setsockopt(
     comptime optname: SO.Name,
     optval: @field(SO.Val, @tagName(optname)),
 ) void {
-    switch (sys.errno(sys.setsockopt(
+    const rc = sys.setsockopt(
         fd,
         @intFromEnum(level),
         @intFromEnum(optname),
         @ptrCast(&optval),
         @sizeOf(@TypeOf(optval)),
-    ))) {
+    );
+
+    return if (!is_windows) switch (sys.errno(rc)) {
         .SUCCESS => {},
         else => |e| unexpectedErrno(e),
-    }
+    } else if (rc == sys.SOCKET_ERROR) unexpectedErrno(sys.WSAGetLastError());
 }
 
-pub fn close(fd: socket_t) void {
-    _ = sys.close(fd);
+pub fn close(fd: sys.fd_t) void {
+    if (!is_windows) {
+        _ = sys.close(fd);
+    } else {
+        // Closing a socket is different from closing a file handle on windows
+        // that is, winsock has to do additional state cleanup for socket handles.
+        // Try to close it as a socket first, otherwise fallback to NtClose.
+
+        if (sys.closesocket(fd) == sys.SOCKET_ERROR) switch (sys.WSAGetLastError()) {
+            .WSAENOTSOCK => _ = std.os.windows.ntdll.NtClose(fd),
+            else => |e| unexpectedErrno(e),
+        };
+    }
 }
 
 pub const pollfd = sys.pollfd;
@@ -212,13 +269,17 @@ pub const PollError = error{
 };
 
 pub fn poll(pollfds: []pollfd, timeout: i32) PollError!usize {
-    const rc = sys.poll(pollfds.ptr, pollfds.len, timeout);
-    return switch (sys.errno(rc)) {
+    const rc = sys.poll(pollfds.ptr, @intCast(pollfds.len), timeout);
+
+    return if (!is_windows) switch (sys.errno(rc)) {
         .SUCCESS => @intCast(rc),
         .INTR => error.Interrupted,
         .NOMEM => error.SystemResources,
         else => |e| unexpectedErrno(e),
-    };
+    } else if (rc == sys.SOCKET_ERROR) switch (sys.WSAGetLastError()) {
+        .WSAENOBUFS => error.SystemResources,
+        else => |e| unexpectedErrno(e),
+    } else @intCast(rc);
 }
 
 pub const AcceptError = error{
@@ -244,6 +305,25 @@ pub fn accept(fd: socket_t, addr: *Sockaddr, flags: SOCK.Flags) AcceptError!sock
             .NFILE => error.SystemFdQuotaExceeded,
             .PERM => error.BlockedByFirewall,
             .PROTO => error.ProtocolError,
+            else => |e| unexpectedErrno(e),
+        };
+    }
+
+    if (is_windows) {
+        const rc = sys.accept(fd, addr.rawMut(), &addrlen);
+        return if (rc != invalid_fd) set_flags: {
+            if (flags.isActive(.NONBLOCK)) {
+                var argp: u32 = 1;
+                if (sys.ioctlsocket(rc, sys.FIONBIO, &argp) == sys.SOCKET_ERROR)
+                    unexpectedErrno(sys.WSAGetLastError());
+            }
+
+            break :set_flags rc;
+        } else switch (sys.WSAGetLastError()) {
+            .WSAEWOULDBLOCK => error.WouldBlock,
+            .WSAECONNRESET => error.ConnectionAborted,
+            .WSAEMFILE => error.ProcessFdQuotaExceeded,
+            .WSAENOBUFS => error.SystemResources,
             else => |e| unexpectedErrno(e),
         };
     }
@@ -304,38 +384,121 @@ pub const ClockGetTimeError = error{
 
 pub fn clock_gettime(id: ClockId) ClockGetTimeError!timespec {
     var spec: timespec = undefined;
-    return switch (sys.errno(sys.clock_gettime(@enumFromInt(@intFromEnum(id)), &spec))) {
+
+    if (!is_windows) return switch (sys.errno(sys.clock_gettime(@enumFromInt(@intFromEnum(id)), &spec))) {
         .SUCCESS => spec,
         .INVAL => error.UnsupportedClock,
         else => |e| unexpectedErrno(e),
-    };
+    } else switch (id) {
+        // emulate `clock_gettime` through windows APIs.
+        .REALTIME => {
+            const epoch_ns = std.time.epoch.windows * std.time.ns_per_s;
+            return nsToTimespec(@as(i96, std.os.windows.ntdll.RtlGetSystemTimePrecise()) * 100 + epoch_ns);
+        },
+        .MONOTONIC => {
+            const qpf: u64 = qpf: {
+                var qpf: std.os.windows.LARGE_INTEGER = undefined;
+                if (!std.os.windows.ntdll.RtlQueryPerformanceFrequency(&qpf).toBool())
+                    return std.mem.zeroes(timespec);
+
+                break :qpf @bitCast(qpf);
+            };
+
+            const qpc: u64 = qpc: {
+                var qpc: std.os.windows.LARGE_INTEGER = undefined;
+                if (!std.os.windows.ntdll.RtlQueryPerformanceCounter(&qpc).toBool())
+                    return std.mem.zeroes(timespec);
+
+                break :qpc @bitCast(qpc);
+            };
+
+            const common_qpf = 10_000_000;
+
+            const ns: i96 = if (qpf == common_qpf)
+                qpc * (std.time.ns_per_s / common_qpf)
+            else scale: {
+                const scale = @as(u64, std.time.ns_per_s << 32) / @as(u32, @intCast(qpf));
+                break :scale @intCast((@as(u96, qpc) * scale) >> 32);
+            };
+
+            return nsToTimespec(ns);
+        },
+    }
 }
 
 pub inline fn timespecToNs(tp: timespec) i96 {
     return @intCast(@as(i96, tp.sec) * std.time.ns_per_s + tp.nsec);
 }
 
+pub inline fn nsToTimespec(ns: i96) timespec {
+    return .{
+        .sec = @intCast(@divFloor(ns, std.time.ns_per_s)),
+        .nsec = @intCast(@mod(ns, std.time.ns_per_s)),
+    };
+}
+
 pub const RecvmsgError = error{
     WouldBlock,
+    ConnectionReset,
     SystemResources,
     PeerUnresponsive,
+    MessageOversize,
 };
 
-pub const msghdr = std.posix.msghdr;
-pub const msghdr_const = std.posix.msghdr_const;
+pub const msghdr = switch (native_os) {
+    .windows => sys.msghdr,
+    else => std.posix.msghdr,
+};
 
-pub const iovec = std.posix.iovec;
-pub const iovec_const = std.posix.iovec_const;
+pub const msghdr_const = switch (native_os) {
+    .windows => sys.msghdr_const,
+    else => std.posix.msghdr_const,
+};
+
+pub const iovec = switch (native_os) {
+    .windows => sys.iovec,
+    else => std.posix.iovec,
+};
+
+pub const iovec_const = switch (native_os) {
+    .windows => sys.iovec_const,
+    else => std.posix.iovec_const,
+};
 
 pub fn recvmsg(fd: socket_t, msg: *msghdr, flags: u32) RecvmsgError!usize {
-    const rc = sys.recvmsg(fd, msg, flags);
-    return switch (sys.errno(rc)) {
-        .SUCCESS => @intCast(rc),
-        .AGAIN => error.WouldBlock,
-        .NOMEM => error.SystemResources,
-        .TIMEDOUT => error.PeerUnresponsive,
-        else => |e| unexpectedErrno(e),
-    };
+    if (is_windows) {
+        var lpNumberOfBytesRecvd: u32 = undefined;
+        const rc = sys.WSARecvFrom(
+            fd,
+            msg.iov,
+            msg.iovlen,
+            &lpNumberOfBytesRecvd,
+            &msg.flags,
+            msg.name,
+            &msg.namelen,
+            null, // lpOverlapped
+            null, // lpCompletionRoutine
+        );
+
+        return if (rc == sys.SOCKET_ERROR) switch (sys.WSAGetLastError()) {
+            .WSAEWOULDBLOCK => error.WouldBlock,
+            .WSAECONNRESET => error.ConnectionReset,
+            .WSAENOBUFS => error.SystemResources,
+            .WSAEMSGSIZE => error.MessageOversize,
+            .WSAETIMEDOUT => error.PeerUnresponsive,
+            else => |e| unexpectedErrno(e),
+        } else lpNumberOfBytesRecvd;
+    } else { // POSIX
+        const rc = sys.recvmsg(fd, msg, flags);
+        return switch (sys.errno(rc)) {
+            .SUCCESS => @intCast(rc),
+            .AGAIN => error.WouldBlock,
+            .CONNRESET => error.ConnectionReset,
+            .NOMEM => error.SystemResources,
+            .TIMEDOUT => error.PeerUnresponsive,
+            else => |e| unexpectedErrno(e),
+        };
+    }
 }
 
 pub const SendmsgError = error{
@@ -347,21 +510,43 @@ pub const SendmsgError = error{
 };
 
 pub fn sendmsg(fd: socket_t, msg: *const msghdr_const, flags: u32) SendmsgError!usize {
-    const new_flags = if (@hasDecl(sys.MSG, "NOSIGNAL"))
-        flags | sys.MSG.NOSIGNAL
-    else
-        flags;
+    if (is_windows) {
+        var lpNumberOfBytesSent: u32 = undefined;
+        const rc = sys.WSASendTo(
+            fd,
+            msg.iov,
+            msg.iovlen,
+            &lpNumberOfBytesSent,
+            flags,
+            msg.name,
+            msg.namelen,
+            null, // lpOverlapped
+            null, // lpCompletionRoutine
+        );
 
-    const rc = sys.sendmsg(fd, msg, new_flags);
-    return switch (sys.errno(rc)) {
-        .SUCCESS => @intCast(rc),
-        .AGAIN => error.WouldBlock,
-        .CONNRESET => error.ConnectionReset,
-        .MSGSIZE => error.MessageOversize,
-        .NOBUFS, .NOMEM => error.SystemResources,
-        .PIPE => error.WriteHalfShutdown,
-        else => |e| unexpectedErrno(e),
-    };
+        return if (rc == sys.SOCKET_ERROR) switch (sys.WSAGetLastError()) {
+            .WSAENOBUFS => error.SystemResources,
+            .WSAEMSGSIZE => error.MessageOversize,
+            .WSAECONNRESET, .WSAENETRESET => error.ConnectionReset,
+            else => |e| unexpectedErrno(e),
+        } else lpNumberOfBytesSent;
+    } else { // POSIX
+        const new_flags = if (@hasDecl(sys.MSG, "NOSIGNAL"))
+            flags | sys.MSG.NOSIGNAL
+        else
+            flags;
+
+        const rc = sys.sendmsg(fd, msg, new_flags);
+        return switch (sys.errno(rc)) {
+            .SUCCESS => @intCast(rc),
+            .AGAIN => error.WouldBlock,
+            .CONNRESET => error.ConnectionReset,
+            .MSGSIZE => error.MessageOversize,
+            .NOBUFS, .NOMEM => error.SystemResources,
+            .PIPE => error.WriteHalfShutdown,
+            else => |e| unexpectedErrno(e),
+        };
+    }
 }
 
 fn unexpectedErrno(errno: anytype) noreturn {
@@ -371,7 +556,13 @@ fn unexpectedErrno(errno: anytype) noreturn {
         std.process.abort();
 }
 
-const sys = std.posix.system;
+const sys = switch (native_os) {
+    .windows => @import("posix/win32.zig"),
+    else => std.posix.system,
+};
+
+const is_windows = native_os == .windows;
+const native_os = builtin.os.tag;
 
 const builtin = @import("builtin");
 const std = @import("std");

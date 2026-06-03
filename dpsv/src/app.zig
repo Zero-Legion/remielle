@@ -39,7 +39,7 @@ pub fn listen(arena: Allocator, n_slots: usize, data: *const Data, address: *con
 
         events: while (n_events != 0 and pollfd_i != storage.pollfds.len) : (pollfd_i += 1) {
             const pollfd = &storage.pollfds[pollfd_i];
-            if (pollfd.revents == 0) continue;
+            if (pollfd.revents == 0 or pollfd.revents == posix.POLL.NVAL) continue;
             n_events -= 1;
 
             if (pollfd_i == n_slots) {
@@ -159,7 +159,7 @@ fn serve(data: *const Data, slot: *Slot) !void {
             .reading => |*read| {
                 var iov: posix.iovec = .{
                     .base = (&read.buffer).ptr[read.end..],
-                    .len = read.buffer.len - read.end,
+                    .len = @intCast(read.buffer.len - read.end),
                 };
 
                 var header: posix.msghdr = .{
@@ -229,8 +229,8 @@ fn serve(data: *const Data, slot: *Slot) !void {
                 }
 
                 // constCast: `header.iov` is a pointer to `write.iovecs`
-                @constCast(header.iov)[0].base += n_write;
-                @constCast(header.iov)[0].len -= n_write;
+                @constCast(header.iov)[0].base += @intCast(n_write);
+                @constCast(header.iov)[0].len -= @intCast(n_write);
             },
             .done => unreachable,
         };
@@ -278,8 +278,11 @@ pub const Slot = struct {
 
             slots[slots.len - 1].free_list_node = .none;
 
-            for (pollfds) |*pollfd|
-                pollfd.fd = -1;
+            for (pollfds) |*pollfd| pollfd.* = .{
+                .fd = posix.invalid_fd,
+                .events = 0,
+                .revents = 0,
+            };
 
             return .{
                 .mutex = .unlocked,
@@ -295,7 +298,7 @@ pub const Slot = struct {
 
         pub fn removeAt(s: *Storage, index: usize) void {
             s.pollfds[index] = .{
-                .fd = -1,
+                .fd = posix.invalid_fd,
                 .events = 0,
                 .revents = 0,
             };
