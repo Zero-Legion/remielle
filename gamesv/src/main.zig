@@ -33,8 +33,16 @@ pub fn main(init: Init.Minimal) u8 {
         return 1;
     };
 
-    const csprng_seed: [DefaultCsprng.secret_seed_length]u8 = undefined;
-    // TODO: rmio.posix.getentropy(&csprng_seed);
+    var csprng_seed: [DefaultCsprng.secret_seed_length]u8 = undefined;
+    posix.getentropy(&csprng_seed) catch |err| switch (err) {
+        error.EntropyUnavailable => if (options.insecure_random_allowed) {
+            // Fallback seed
+            const timestamp = posix.timespecToNs(posix.clock_gettime(.MONOTONIC) catch
+                std.mem.zeroes(posix.timespec));
+
+            std.mem.writeInt(i96, csprng_seed[0 .. @bitSizeOf(i96) / 8], timestamp, .big);
+        } else fatal("failed to collect entropy", .{}),
+    };
 
     var csprng_impl: DefaultCsprng = .init(csprng_seed);
     const csprng = csprng_impl.random();
