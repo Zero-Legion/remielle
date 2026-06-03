@@ -14,7 +14,7 @@ pub const ClientVariables = struct {
 };
 
 pub fn bind(gpa: Allocator, csprng: Random, bind_address: *const posix.Sockaddr) u8 {
-    const server_fd = posix.socket(.INET, .init(.DGRAM, .flags(.{.CLOEXEC})), .UDP) catch |err|
+    const server_fd = posix.socket(.INET, .init(.DGRAM, .flags(.{ .CLOEXEC = true })), .UDP) catch |err|
         fatal("socket: {t}", .{err});
 
     defer posix.close(server_fd);

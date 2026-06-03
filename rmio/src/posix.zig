@@ -18,11 +18,13 @@ pub const SOCK = enum(u32) {
         CLOEXEC = sys.SOCK.CLOEXEC,
         _,
 
-        /// 'enabled' is a tuple of `Flag` fields
-        pub fn flags(comptime enabled: anytype) Flags {
+        pub fn flags(enabled: FlagStruct(Flags)) Flags {
             var f: u32 = 0;
-            inline for (enabled) |flag|
-                f |= @intFromEnum(@as(Flags, flag));
+
+            inline for (@typeInfo(Flags).@"enum".fields) |field| {
+                if (@field(enabled, field.name))
+                    f |= field.value;
+            }
 
             return @enumFromInt(f);
         }
@@ -616,6 +618,26 @@ fn unexpectedErrno(errno: anytype) noreturn {
         std.debug.panic("unexpected errno: {t}", .{errno})
     else
         std.process.abort();
+}
+
+/// For an enum type representing flags,
+/// returns a struct with each flag as a boolean field.
+///
+/// The fields themselves do not correlate with actual flag values.
+fn FlagStruct(comptime FlagEnum: type) type {
+    const enum_fields = @typeInfo(FlagEnum).@"enum".fields;
+    var field_names: [enum_fields.len][]const u8 = undefined;
+
+    inline for (enum_fields, &field_names) |enum_field, *field_name|
+        field_name.* = enum_field.name;
+
+    return @Struct(
+        .auto,
+        null,
+        &field_names,
+        &@splat(bool),
+        &@splat(.{ .default_value_ptr = &false }),
+    );
 }
 
 const sys = switch (native_os) {

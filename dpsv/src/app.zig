@@ -7,7 +7,11 @@ pub fn listen(arena: Allocator, n_slots: usize, data: *const Data, address: *con
     var storage = Slot.Storage.initAlloc(arena, n_slots) catch
         fatal("failed to allocate {d} slots", .{n_slots});
 
-    const listen_fd = posix.socket(.INET, .init(.STREAM, .flags(.{ .NONBLOCK, .CLOEXEC })), .TCP) catch |err|
+    const listen_fd = posix.socket(
+        .INET,
+        .init(.STREAM, .flags(.{ .NONBLOCK = true, .CLOEXEC = true })),
+        .TCP,
+    ) catch |err|
         fatal("socket: {t}", .{err});
 
     defer posix.close(listen_fd);
@@ -74,7 +78,7 @@ fn acceptAll(
         const client_fd = try posix.accept(
             listen_fd,
             &client_addr,
-            .flags(.{ .CLOEXEC, .NONBLOCK }),
+            .flags(.{ .CLOEXEC = true, .NONBLOCK = true }),
         );
 
         log.debug("new client from {f}", .{client_addr});
