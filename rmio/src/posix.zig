@@ -1,3 +1,12 @@
+//! Namespace defining The Portable Operating System Interface (POSIX).
+//! It includes:
+//! * timers
+//! * entropy
+//! * networking
+//! * I/O multiplexing
+//! This namespace allows programmers to write *truly* optimal, reusable code while
+//! participating in these operations.
+
 pub const AF = enum(u32) {
     INET = sys.AF.INET,
     UNIX = sys.AF.UNIX,
