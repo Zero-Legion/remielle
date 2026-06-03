@@ -1,7 +1,7 @@
 const log = std.log.scoped(.@"remielle-dpsv");
 
+const accept_backlog: u31 = 100;
 const buffer_size: usize = 8192;
-const accept_timeout: Io.Duration = .fromSeconds(1);
 
 pub fn listen(arena: Allocator, n_slots: usize, data: *const Data, address: *const posix.Sockaddr) u8 {
     var storage = Slot.Storage.initAlloc(arena, n_slots) catch
@@ -25,8 +25,9 @@ pub fn listen(arena: Allocator, n_slots: usize, data: *const Data, address: *con
         else => |e| fatal("bind: {t}", .{e}),
     };
 
-    posix.listen(listen_fd, 100) catch |err| fatal("listen: {t}", .{err});
+    posix.listen(listen_fd, accept_backlog) catch |err| fatal("listen: {t}", .{err});
 
+    // Start polling on the listening socket.
     storage.pollfds[n_slots] = .{
         .fd = listen_fd,
         .events = posix.POLL.IN,
@@ -37,118 +38,110 @@ pub fn listen(arena: Allocator, n_slots: usize, data: *const Data, address: *con
         var n_events = posix.poll(storage.pollfds, -1) catch |err| fatal("poll: {t}", .{err});
         var pollfd_i: usize = 0;
 
-        events: while (n_events != 0 and pollfd_i != storage.pollfds.len) : (pollfd_i += 1) {
+        while (n_events != 0 and pollfd_i != storage.pollfds.len) : (pollfd_i += 1) {
             const pollfd = &storage.pollfds[pollfd_i];
             if (pollfd.revents == 0 or pollfd.revents == posix.POLL.NVAL) continue;
             n_events -= 1;
 
             if (pollfd_i == n_slots) {
-                while (true) {
-                    var client_addr: posix.Sockaddr = .{ .in = std.mem.zeroes(posix.Sockaddr.In) };
-                    const client_fd = posix.accept(
-                        listen_fd,
-                        &client_addr,
-                        .flags(.{ .CLOEXEC, .NONBLOCK }),
-                    ) catch |err| switch (err) {
-                        error.WouldBlock => continue :events,
-                        else => |e| {
-                            log.err("accept: {t}", .{e});
-                            continue :events;
-                        },
-                    };
-
-                    log.debug("new client from {f}", .{client_addr});
-
-                    const slot_index = switch (storage.free_list_head) {
-                        .none => evict: {
-                            var earliest_ns: i96 = std.math.maxInt(i96);
-                            var index: usize = std.math.maxInt(usize);
-
-                            for (storage.slots, 0..) |slot, i| if (slot.activity_time_ns < earliest_ns) {
-                                earliest_ns = slot.activity_time_ns;
-                                index = i;
-                            };
-
-                            log.debug("evicted connection at slot #{d}", .{index});
-                            posix.close(storage.slots[index].fd);
-
-                            break :evict index;
-                        },
-                        _ => |index| occupy: {
-                            const slot = &storage.slots[index.toInt()];
-                            storage.free_list_head = slot.free_list_node;
-                            slot.free_list_node = .none;
-
-                            break :occupy index.toInt();
-                        },
-                    };
-
-                    const slot = &storage.slots[slot_index];
-
-                    slot.* = .{
-                        .fd = client_fd,
-                        .state = .{ .reading = .{
-                            .buffer = undefined,
-                            .end = 0,
-                        } },
-                        .activity_time_ns = posix.timespecToNs(posix.clock_gettime(.MONOTONIC) catch unreachable),
-                        .free_list_node = .none,
-                    };
-
-                    serve(data, slot) catch |err| switch (err) {
-                        error.WouldBlock => {},
-                        else => |e| {
-                            log.err("serve failed: {t}", .{e});
-                            posix.close(slot.fd);
-                            storage.removeAt(slot_index);
-                        },
-                    };
-
-                    storage.pollfds[slot_index] = .{
-                        .fd = slot.fd,
-                        .events = switch (slot.state) {
-                            .reading => posix.POLL.IN,
-                            .writing => posix.POLL.OUT,
-                            .done => {
-                                posix.close(slot.fd);
-                                storage.removeAt(slot_index);
-                                continue;
-                            },
-                        },
-                        .revents = 0,
-                    };
-                }
-            } else {
-                const slot_index = pollfd_i;
-                const slot = &storage.slots[slot_index];
-
-                serve(data, slot) catch |err| switch (err) {
-                    error.WouldBlock => {},
+                // I/O activity reported on listening socket.
+                acceptAll(listen_fd, &storage, data) catch |err| switch (err) {
+                    error.WouldBlock => continue, // Back to polling.
                     else => |e| {
-                        log.err("serve failed: {t}", .{e});
-                        posix.close(slot.fd);
-                        storage.removeAt(slot_index);
+                        log.err("acceptAll failed: {t}", .{e});
+                        continue;
                     },
                 };
-
-                storage.pollfds[slot_index] = .{
-                    .fd = slot.fd,
-                    .events = switch (slot.state) {
-                        .reading => posix.POLL.IN,
-                        .writing => posix.POLL.OUT,
-                        .done => {
-                            posix.close(slot.fd);
-                            storage.removeAt(slot_index);
-                            continue;
-                        },
-                    },
-                    .revents = 0,
-                };
+            } else {
+                // I/O activity reported on socket at `pollfd_i`, operate.
+                operateAt(data, &storage, pollfd_i);
             }
         }
     }
 
     return 0;
+}
+
+/// Accepts all outstanding connection requests in OS queue
+/// until the accept call suffers an error.
+fn acceptAll(
+    listen_fd: posix.socket_t,
+    storage: *Slot.Storage,
+    data: *const Data,
+) posix.AcceptError!void {
+    while (true) {
+        var client_addr: posix.Sockaddr = .{ .in = std.mem.zeroes(posix.Sockaddr.In) };
+        const client_fd = try posix.accept(
+            listen_fd,
+            &client_addr,
+            .flags(.{ .CLOEXEC, .NONBLOCK }),
+        );
+
+        log.debug("new client from {f}", .{client_addr});
+
+        const slot_index = switch (storage.free_list_head) {
+            .none => evict: {
+                var earliest_ns: i96 = std.math.maxInt(i96);
+                var index: usize = std.math.maxInt(usize);
+
+                for (storage.slots, 0..) |slot, i| if (slot.activity_time_ns < earliest_ns) {
+                    earliest_ns = slot.activity_time_ns;
+                    index = i;
+                };
+
+                log.debug("evicted connection at slot #{d}", .{index});
+                posix.close(storage.slots[index].fd);
+
+                break :evict index;
+            },
+            _ => |index| occupy: {
+                const slot = &storage.slots[index.toInt()];
+                storage.free_list_head = slot.free_list_node;
+                slot.free_list_node = .none;
+
+                break :occupy index.toInt();
+            },
+        };
+
+        storage.slots[slot_index] = .{
+            .fd = client_fd,
+            .state = .{ .reading = .{
+                .buffer = undefined,
+                .end = 0,
+            } },
+            .activity_time_ns = 0, // Populated by `serve`
+            .free_list_node = .none,
+        };
+
+        operateAt(data, storage, slot_index);
+    }
+}
+
+fn operateAt(data: *const Data, storage: *Slot.Storage, slot_index: usize) void {
+    const slot = &storage.slots[slot_index];
+
+    if (serve(data, slot)) {
+        // We're done
+        posix.close(slot.fd);
+        storage.removeAt(slot_index);
+    } else |err| switch (err) {
+        error.WouldBlock => {
+            // Start polling on this client's socket.
+            storage.pollfds[slot_index] = .{
+                .fd = slot.fd,
+                .events = switch (slot.state) {
+                    .reading => posix.POLL.IN,
+                    .writing => posix.POLL.OUT,
+                },
+                .revents = 0,
+            };
+        },
+        else => |e| {
+            log.err("serve failed: {t}", .{e});
+            posix.close(slot.fd);
+            storage.removeAt(slot_index);
+        },
+    }
 }
 
 fn serve(data: *const Data, slot: *Slot) !void {
@@ -173,11 +166,9 @@ fn serve(data: *const Data, slot: *Slot) !void {
                 };
 
                 const n_read = try posix.recvmsg(slot.fd, &header, 0);
-
-                if (n_read == 0) {
-                    slot.state = .done;
+                if (n_read == 0)
+                    // Nothing to read.
                     return;
-                }
 
                 read.end += @truncate(n_read);
 
@@ -222,17 +213,15 @@ fn serve(data: *const Data, slot: *Slot) !void {
                     header.iov = header.iov[1..];
                     header.iovlen -= 1;
 
-                    if (header.iovlen == 0) {
-                        slot.state = .done;
+                    if (header.iovlen == 0)
+                        // Nothing to send.
                         return;
-                    }
                 }
 
                 // constCast: `header.iov` is a pointer to `write.iovecs`
                 @constCast(header.iov)[0].base += @intCast(n_write);
                 @constCast(header.iov)[0].len -= @intCast(n_write);
             },
-            .done => unreachable,
         };
 }
 
@@ -244,14 +233,13 @@ pub const Slot = struct {
 
     const State = union(enum) {
         reading: struct {
-            buffer: [8192]u8,
+            buffer: [buffer_size]u8,
             end: u32,
         },
         writing: struct {
             header: posix.msghdr_const,
             iovecs: [2]posix.iovec_const,
         },
-        done: void,
     };
 
     const OptionalIndex = enum(u32) {
@@ -265,7 +253,6 @@ pub const Slot = struct {
     };
 
     const Storage = struct {
-        mutex: std.atomic.Mutex,
         slots: []Slot,
         pollfds: []posix.pollfd,
         free_list_head: OptionalIndex,
@@ -285,7 +272,6 @@ pub const Slot = struct {
             };
 
             return .{
-                .mutex = .unlocked,
                 .slots = slots,
                 .pollfds = pollfds,
                 .free_list_head = @enumFromInt(0),
@@ -315,11 +301,8 @@ fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
 }
 
 const posix = rmio.posix;
-
-const Io = std.Io;
 const Allocator = std.mem.Allocator;
 
-const net = std.Io.net;
 const debug = std.debug;
 
 const Data = @import("Data.zig");
