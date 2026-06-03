@@ -88,6 +88,9 @@ pub const iovec_const = extern struct {
     base: [*]const u8,
 };
 
+pub extern "advapi32" fn SystemFunction036(output: [*]u8, length: ULONG) callconv(.winapi) BOOL;
+pub const RtlGenRandom = SystemFunction036;
+
 pub extern "ws2_32" fn WSAStartup(wVersionRequired: WORD, lpWSAData: *WSADATA) callconv(.winapi) i32;
 pub extern "ws2_32" fn WSAGetLastError() callconv(.winapi) WinsockError;
 pub extern "ws2_32" fn socket(af: u32, st: u32, proto: u32) callconv(.winapi) fd_t;
@@ -716,6 +719,7 @@ pub const WinsockError = enum(u16) {
     _,
 };
 
+const BOOL = windows.BOOL;
 const WORD = windows.WORD;
 const ULONG = windows.ULONG;
 const USHORT = windows.USHORT;

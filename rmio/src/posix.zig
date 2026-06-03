@@ -448,14 +448,6 @@ pub inline fn msToTimespec(ms: i64) timespec {
     };
 }
 
-pub const RecvmsgError = error{
-    WouldBlock,
-    ConnectionReset,
-    SystemResources,
-    PeerUnresponsive,
-    MessageOversize,
-};
-
 pub const msghdr = switch (native_os) {
     .windows => sys.msghdr,
     else => std.posix.msghdr,
@@ -474,6 +466,14 @@ pub const iovec = switch (native_os) {
 pub const iovec_const = switch (native_os) {
     .windows => sys.iovec_const,
     else => std.posix.iovec_const,
+};
+
+pub const RecvmsgError = error{
+    WouldBlock,
+    ConnectionReset,
+    SystemResources,
+    PeerUnresponsive,
+    MessageOversize,
 };
 
 pub fn recvmsg(fd: socket_t, msg: *msghdr, flags: u32) RecvmsgError!usize {
@@ -557,6 +557,48 @@ pub fn sendmsg(fd: socket_t, msg: *const msghdr_const, flags: u32) SendmsgError!
             .PIPE => error.WriteHalfShutdown,
             else => |e| unexpectedErrno(e),
         };
+    }
+}
+
+pub const GetEntropyError = error{
+    EntropyUnavailable,
+};
+
+pub fn getentropy(buf: []u8) GetEntropyError!void {
+    return switch (native_os) {
+        .windows => win32GenRandom(buf),
+        else => readUrandom(buf),
+    };
+}
+
+fn readUrandom(buf: []u8) GetEntropyError!void {
+    const open_rc = sys.open("/dev/urandom", .{}, 0);
+    const fd: sys.fd_t = switch (sys.errno(open_rc)) {
+        .SUCCESS => @intCast(open_rc),
+        else => return error.EntropyUnavailable,
+    };
+
+    defer _ = sys.close(fd);
+
+    var unfilled = buf;
+    while (unfilled.len != 0) {
+        const read_rc = sys.read(fd, unfilled.ptr, @intCast(unfilled.len));
+        switch (sys.errno(read_rc)) {
+            .SUCCESS => unfilled = unfilled[read_rc..],
+            else => return error.EntropyUnavailable,
+        }
+    }
+}
+
+fn win32GenRandom(buf: []u8) GetEntropyError!void {
+    var unfilled = buf;
+
+    while (unfilled.len != 0) {
+        const n_fill: std.os.windows.ULONG = @truncate(unfilled.len);
+        if (sys.RtlGenRandom(unfilled.ptr, n_fill) == .FALSE)
+            return error.EntropyUnavailable;
+
+        unfilled = unfilled[n_fill..];
     }
 }
 
