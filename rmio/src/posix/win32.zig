@@ -4,7 +4,7 @@ pub const fd_t = windows.HANDLE;
 pub const socklen_t = u32;
 
 pub const timespec = extern struct {
-    sec: u64,
+    sec: i64,
     nsec: c_long,
 };
 
