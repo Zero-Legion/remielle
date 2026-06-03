@@ -430,10 +430,21 @@ pub inline fn timespecToNs(tp: timespec) i96 {
     return @intCast(@as(i96, tp.sec) * std.time.ns_per_s + tp.nsec);
 }
 
+pub inline fn timespecToMs(tp: timespec) i64 {
+    return @intCast(@as(i64, tp.sec) * std.time.ms_per_s + @divFloor(tp.nsec, std.time.ns_per_ms));
+}
+
 pub inline fn nsToTimespec(ns: i96) timespec {
     return .{
         .sec = @intCast(@divFloor(ns, std.time.ns_per_s)),
         .nsec = @intCast(@mod(ns, std.time.ns_per_s)),
+    };
+}
+
+pub inline fn msToTimespec(ms: i64) timespec {
+    return .{
+        .sec = @intCast(@divFloor(ms, std.time.ms_per_s)),
+        .nsec = @intCast(@mod(ms, std.time.ms_per_s) * std.time.ns_per_ms),
     };
 }
 
