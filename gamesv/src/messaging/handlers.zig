@@ -32,7 +32,7 @@ pub fn process(
     arena: Allocator,
     server: *kcp.Server,
     cvars: *ClientVariables,
-    time: Io.Timestamp,
+    time: posix.timespec,
     reader: *Io.Reader,
     client: u32,
 ) ProcessError!void {
@@ -107,7 +107,7 @@ pub fn Request(comptime message_name: @EnumLiteral()) type {
         body: *const Body,
         server: *kcp.Server,
         cvars: *ClientVariables,
-        time: Io.Timestamp,
+        time: posix.timespec,
         client: u32,
         packet_id: u32,
 
@@ -190,9 +190,12 @@ const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const ClientVariables = app.ClientVariables;
 
+const posix = rmio.posix;
+
 const app = @import("../app.zig");
 const kcp = @import("../kcp.zig");
 const messaging = @import("../messaging.zig");
 
+const rmio = @import("rmio");
 const rmpb = @import("rmpb");
 const std = @import("std");

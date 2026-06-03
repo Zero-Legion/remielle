@@ -1,6 +1,6 @@
 pub fn getServerTimestamp(request: handlers.Request(.GetServerTimestampCsReq)) !void {
     try request.respond(.GetServerTimestampScRsp, .{
-        .timestamp = @intCast(request.time.toMilliseconds()),
+        .timestamp = @intCast(posix.timespecToMs(request.time)),
     });
 }
 
@@ -66,5 +66,6 @@ const unlock_ids: []const i32 = &.{
 
 const handlers = @import("../handlers.zig");
 
+const posix = @import("rmio").posix;
 const pb = @import("rmpb").main;
 const std = @import("std");

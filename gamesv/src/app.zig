@@ -13,20 +13,22 @@ pub const ClientVariables = struct {
     }
 };
 
-pub fn bind(io: Io, gpa: Allocator, csprng: Random, bind_address: net.IpAddress) u8 {
-    const socket = bind_address.bind(io, .{ .mode = .dgram, .protocol = .udp }) catch |err| {
-        switch (err) {
-            error.AddressInUse => log.err(
+pub fn bind(gpa: Allocator, csprng: Random, bind_address: *const posix.Sockaddr) u8 {
+    const server_fd = posix.socket(.INET, .init(.DGRAM, .flags(.{.CLOEXEC})), .UDP) catch |err|
+        fatal("socket: {t}", .{err});
+
+    defer posix.close(server_fd);
+
+    posix.bind(server_fd, bind_address) catch |err| switch (err) {
+        error.AddressInUse => {
+            log.err(
                 "the address {f} is already in use; another instance of this server might be already running",
                 .{bind_address},
-            ),
-            else => |e| log.err("failed to bind at {f}: {t}", .{ bind_address, e }),
-        }
-
-        return 1;
+            );
+            return 1;
+        },
+        else => |e| fatal("bind: {t}", .{e}),
     };
-
-    defer socket.close(io);
 
     var server: kcp.Server = undefined;
     const slots: usize = 16;
@@ -57,12 +59,27 @@ pub fn bind(io: Io, gpa: Allocator, csprng: Random, bind_address: net.IpAddress)
     var per_message_arena: heap.ArenaAllocator = .init(gpa);
     defer per_message_arena.deinit();
 
-    receive_loop: while (true) {
+    while (true) {
         var buffer: [kcp.mtu]u8 = undefined;
-        const in_message = socket.receive(io, &buffer) catch |err| switch (err) {
-            // Currently nothing will ever cancel it, but this will be a thing for graceful shutdown.
-            error.Canceled => break :receive_loop,
 
+        var iov: [1]posix.iovec = .{.{
+            .base = &buffer,
+            .len = @intCast(buffer.len),
+        }};
+
+        var name: posix.Sockaddr = .{ .in = std.mem.zeroes(posix.Sockaddr.In) };
+
+        var header: posix.msghdr = .{
+            .name = name.rawMut(),
+            .namelen = @sizeOf(posix.Sockaddr.In),
+            .iov = (&iov)[0..1],
+            .iovlen = 1,
+            .control = null,
+            .controllen = 0,
+            .flags = 0,
+        };
+
+        const n_recv = posix.recvmsg(server_fd, &header, 0) catch |err| switch (err) {
             // The size of packet was greater than `mtu`,
             // this should not happen for well-behaved clients.
             error.MessageOversize => continue,
@@ -73,20 +90,35 @@ pub fn bind(io: Io, gpa: Allocator, csprng: Random, bind_address: net.IpAddress)
             },
         };
 
-        if (in_message.data.len == kcp.Control.size) {
+        if (n_recv == kcp.Control.size) {
             var out_buf: [kcp.Control.size]u8 = undefined;
             const ev = handleControlPacket(
                 &conv_counter,
                 random_num,
-                &in_message.from,
-                in_message.data[0..kcp.Control.size],
+                &name.in,
+                buffer[0..kcp.Control.size],
                 &out_buf,
             );
 
-            if (ev.ack) socket.send(io, &in_message.from, &out_buf) catch |err| switch (err) {
-                error.Canceled => break :receive_loop,
-                else => continue,
-            };
+            if (ev.ack) {
+                const ctl_header: posix.msghdr_const = .{
+                    .name = header.name,
+                    .namelen = header.namelen,
+                    .iov = &.{.{
+                        .base = &out_buf,
+                        .len = @intCast(kcp.Control.size),
+                    }},
+                    .iovlen = 1,
+                    .control = null,
+                    .controllen = 0,
+                    .flags = 0,
+                };
+
+                _ = posix.sendmsg(server_fd, &ctl_header, 0) catch |err| switch (err) {
+                    error.MessageOversize => unreachable,
+                    else => continue,
+                };
+            }
 
             switch (ev.free_conv_id) {
                 .none => {},
@@ -95,45 +127,61 @@ pub fn bind(io: Io, gpa: Allocator, csprng: Random, bind_address: net.IpAddress)
                     const client = kv.value;
 
                     server.release(client);
-                    log.debug("player from {f} disconnected", .{in_message.from});
+                    log.debug("player from {f} disconnected", .{name});
                 },
             }
-        } else if (in_message.data.len >= kcp.Header.size) {
-            const header = kcp.Header.decode(in_message.data[0..kcp.Header.size]) catch |err| switch (err) {
+        } else if (n_recv >= kcp.Header.size) {
+            const kcp_header = kcp.Header.decode(buffer[0..kcp.Header.size]) catch |err| switch (err) {
                 error.InvalidCmd => continue,
             };
 
-            if (header.conv_id == .none)
+            if (kcp_header.conv_id == .none)
                 continue; // ill-formed
 
-            if (in_message.data.len < header.len + kcp.Header.size)
+            if (n_recv < kcp_header.len + kcp.Header.size)
                 continue; // ill-formed
 
-            const token = header.token.upgrade(
+            const token = kcp_header.token.upgrade(
                 random_num,
-                @bitCast(in_message.from.ip4.bytes),
-                header.conv_id,
+                @bitCast(name.in.addr),
+                kcp_header.conv_id,
             ) orelse {
                 // This may happen if server has been restarted, but the game
                 // had an active session.
 
                 var ctl: [kcp.Control.size]u8 = undefined;
-                kcp.Control.encode(&ctl, .disconnect, header.conv_id, header.token, 404);
-                socket.send(io, &in_message.from, &ctl) catch |err| switch (err) {
-                    error.Canceled => break :receive_loop,
-                    else => {},
+                kcp.Control.encode(&ctl, .disconnect, kcp_header.conv_id, kcp_header.token, 404);
+
+                const ctl_header: posix.msghdr_const = .{
+                    .name = header.name,
+                    .namelen = header.namelen,
+                    .iov = &.{.{
+                        .base = &ctl,
+                        .len = @intCast(kcp.Control.size),
+                    }},
+                    .iovlen = 1,
+                    .control = null,
+                    .controllen = 0,
+                    .flags = 0,
+                };
+
+                _ = posix.sendmsg(server_fd, &ctl_header, 0) catch |err| switch (err) {
+                    error.MessageOversize => unreachable,
+                    else => continue,
                 };
 
                 continue;
             };
 
-            if (conv_map.get(header.conv_id)) |client| {
-                server.input(client, in_message.data) catch |err| {
-                    log.err("input failed for conv {d}: {t}", .{ header.conv_id.toInt(), err });
+            if (conv_map.get(kcp_header.conv_id)) |client| {
+                server.input(client, buffer[0..n_recv]) catch |err| {
+                    log.err("input failed for conv {d}: {t}", .{ kcp_header.conv_id.toInt(), err });
                     continue;
                 };
 
-                const current_time: Io.Timestamp = .now(io, .real);
+                const current_time = posix.clock_gettime(.REALTIME) catch |err| switch (err) {
+                    error.UnsupportedClock => std.mem.zeroes(posix.timespec),
+                };
 
                 while (true) {
                     var reader = server.reader(client) orelse break;
@@ -153,12 +201,11 @@ pub fn bind(io: Io, gpa: Allocator, csprng: Random, bind_address: net.IpAddress)
                     };
                 }
 
-                drainOutgoingPackets(io, socket, current_time, &server, client, &in_message.from) catch |err| switch (err) {
-                    error.Canceled => break :receive_loop,
+                drainOutgoingPackets(server_fd, current_time, &server, client, &name) catch |err| switch (err) {
                     else => {},
                 };
             } else {
-                const data = in_message.data[kcp.Header.size..][0..header.len];
+                const data = buffer[kcp.Header.size..][0..kcp_header.len];
                 if (data.len < messaging.Header.size) continue; // ill-formed
 
                 const msg_header = messaging.Header.decode(data[0..messaging.Header.size]) catch |err| switch (err) {
@@ -171,7 +218,7 @@ pub fn bind(io: Io, gpa: Allocator, csprng: Random, bind_address: net.IpAddress)
                 if (msg_header.cmd_id != rmpb.main_desc.PlayerGetTokenCsReq.cmd_id) {
                     log.debug(
                         "received unexpected first cmd_id '{d}' from '{f}'",
-                        .{ msg_header.cmd_id, in_message.from },
+                        .{ msg_header.cmd_id, name },
                     );
                     continue;
                 }
@@ -187,12 +234,12 @@ pub fn bind(io: Io, gpa: Allocator, csprng: Random, bind_address: net.IpAddress)
 
                 var br: Io.Reader = .fixed(body);
                 const request = rmpb.decode(.main, rmpb.main.PlayerGetTokenCsReq, fba.allocator(), &br) catch {
-                    log.debug("received malformed PlayerGetTokenCsReq from '{f}'", .{in_message.from});
+                    log.debug("received malformed PlayerGetTokenCsReq from '{f}'", .{name});
                     continue;
                 };
 
                 const client_rand_key = decryptClientRandKey(request.client_rand_key) orelse {
-                    log.debug("failed to decrypt client_rand_key from '{f}'", .{in_message.from});
+                    log.debug("failed to decrypt client_rand_key from '{f}'", .{name});
                     continue;
                 };
 
@@ -209,12 +256,16 @@ pub fn bind(io: Io, gpa: Allocator, csprng: Random, bind_address: net.IpAddress)
                     .sign = &sign,
                 };
 
-                const client = switch (server.create(header.conv_id, token, .now(io, .real)) catch continue) {
+                const current_time = posix.clock_gettime(.REALTIME) catch |err| switch (err) {
+                    error.UnsupportedClock => std.mem.zeroes(posix.timespec),
+                };
+
+                const client = switch (server.create(kcp_header.conv_id, token, current_time) catch continue) {
                     .none => continue, // TODO: evict a client
                     _ => |index| index.toInt(),
                 };
 
-                server.input(client, in_message.data) catch |err| {
+                server.input(client, buffer[0..n_recv]) catch |err| {
                     log.err("server.input failed: {t}", .{err});
                     server.release(client);
                     continue;
@@ -243,17 +294,16 @@ pub fn bind(io: Io, gpa: Allocator, csprng: Random, bind_address: net.IpAddress)
                 const cmd_id = comptime rmpb.Descriptors.main.message(rmpb.main.PlayerGetTokenScRsp).?.descriptor.cmd_id;
                 messaging.encode(&writer.interface, .initial, cmd_id, .init, rsp) catch unreachable;
 
-                drainOutgoingPackets(io, socket, .now(io, .real), &server, client, &in_message.from) catch |err| switch (err) {
-                    error.Canceled => break :receive_loop,
+                drainOutgoingPackets(server_fd, current_time, &server, client, &name) catch |err| switch (err) {
                     else => {},
                 };
 
-                conv_map.putAssumeCapacity(header.conv_id, client);
+                conv_map.putAssumeCapacity(kcp_header.conv_id, client);
 
                 cvars.packet_id_counters[client] = 1;
                 cvars.xorpads[client].fillSeeded(.init(client_rand_key, server_rand_key));
 
-                log.debug("player from {f} has logged in into account with uid {d}", .{ in_message.from, uid });
+                log.debug("player from {f} has logged in into account with uid {d}", .{ name, uid });
             }
         }
     }
@@ -262,12 +312,11 @@ pub fn bind(io: Io, gpa: Allocator, csprng: Random, bind_address: net.IpAddress)
 }
 
 fn drainOutgoingPackets(
-    io: Io,
-    socket: net.Socket,
-    current_time: Io.Timestamp,
+    server_fd: posix.socket_t,
+    current_time: posix.timespec,
     server: *kcp.Server,
     client: u32,
-    destination: *const net.IpAddress,
+    destination: *const posix.Sockaddr,
 ) !void {
     server.update(client, current_time);
 
@@ -280,7 +329,20 @@ fn drainOutgoingPackets(
         const n_send = server.drain(client, &output);
         if (n_send == 0) break;
 
-        try socket.send(io, destination, output[0..n_send]);
+        const header: posix.msghdr_const = .{
+            .name = destination.raw(),
+            .namelen = destination.len(),
+            .iov = &.{.{
+                .base = &output,
+                .len = @intCast(n_send),
+            }},
+            .iovlen = 1,
+            .control = null,
+            .controllen = 0,
+            .flags = 0,
+        };
+
+        _ = try posix.sendmsg(server_fd, &header, 0);
     }
 }
 
@@ -331,7 +393,7 @@ const ControlEvent = struct {
 fn handleControlPacket(
     conv_counter: *kcp.ConvId.Counter,
     random: u64,
-    from: *const net.IpAddress,
+    from: *const posix.Sockaddr.In,
     in_ctl: *const [kcp.Control.size]u8,
     out_ctl: *[kcp.Control.size]u8,
 ) ControlEvent {
@@ -343,7 +405,7 @@ fn handleControlPacket(
             const token: kcp.Token = .init(&.{
                 .random = random,
                 .conv_id = conv_id,
-                .addr = @bitCast(from.ip4.bytes),
+                .addr = @bitCast(from.addr),
             });
 
             kcp.Control.encode(out_ctl, .send_back_conv, conv_id, token.downgrade(), 0);
@@ -354,7 +416,7 @@ fn handleControlPacket(
             const token: kcp.Token = .init(&.{
                 .random = random,
                 .conv_id = conv_id,
-                .addr = @bitCast(from.ip4.bytes),
+                .addr = @bitCast(from.addr),
             });
 
             if (control.isToken(token)) {
@@ -368,10 +430,16 @@ fn handleControlPacket(
     }
 }
 
+fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
+    log.err(fmt, args);
+    std.process.exit(1);
+}
+
 const Io = std.Io;
 const Random = std.Random;
 const Allocator = std.mem.Allocator;
 
+const posix = rmio.posix;
 const net = std.Io.net;
 const heap = std.heap;
 
@@ -380,4 +448,5 @@ const messaging = @import("messaging.zig");
 
 const rmcrypt = @import("rmcrypt");
 const rmpb = @import("rmpb");
+const rmio = @import("rmio");
 const std = @import("std");

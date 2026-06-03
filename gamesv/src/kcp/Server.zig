@@ -244,7 +244,7 @@ pub fn create(
     server: *Server,
     conv_id: kcp.ConvId,
     token: kcp.Token,
-    start_time: Io.Timestamp,
+    start_time: posix.timespec,
 ) Allocator.Error!Conversations.OptionalIndex {
     const index = switch (server.free.head) {
         .none => return .none,
@@ -272,7 +272,7 @@ pub fn create(
     server.conversations.ids[index] = conv_id;
     server.conversations.tokens[index] = token;
 
-    server.conversations.start_time[index] = .fromTimestamp(start_time);
+    server.conversations.start_time[index] = .fromTimespec(start_time);
     server.conversations.last_update[index] = .zero;
 
     server.conversations.rx_rttval[index] = 0;
@@ -642,9 +642,9 @@ pub fn drain(s: *Server, client: u32, output: *[kcp.mtu]u8) usize {
     return writer.end;
 }
 
-pub fn update(s: *Server, client: u32, current_time: Io.Timestamp) void {
+pub fn update(s: *Server, client: u32, current_time: posix.timespec) void {
     const start = s.conversations.start_time[client];
-    const current: kcp.Timeval = .fromTimestamp(current_time);
+    const current: kcp.Timeval = .fromTimespec(current_time);
 
     s.conversations.last_update[client].milliseconds = current.milliseconds -| start.milliseconds;
     const ring = &s.conversations.rings[client].send;
@@ -657,9 +657,12 @@ pub fn update(s: *Server, client: u32, current_time: Io.Timestamp) void {
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
 
+const posix = rmio.posix;
 const heap = std.heap;
 const debug = std.debug;
 
 const kcp = @import("../kcp.zig");
+
+const rmio = @import("rmio");
 const std = @import("std");
 const Server = @This();
