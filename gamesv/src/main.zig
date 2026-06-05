@@ -5,6 +5,10 @@ pub const Options = struct {
     insecure_random_allowed: bool = false,
 };
 
+pub const std_options: std.Options = .{
+    .logFn = rmio.log.logFn,
+};
+
 pub fn main(init: Init.Minimal) u8 {
     var debug_allocator: heap.DebugAllocator(.{}) = .init;
     defer if (is_debug) {

@@ -5,6 +5,10 @@ pub const Options = struct {
     listen_address: []const u8 = @import("config").listen_address,
 };
 
+pub const std_options: std.Options = .{
+    .logFn = rmio.log.logFn,
+};
+
 pub fn main(init: Init.Minimal) u8 {
     var debug_allocator: heap.DebugAllocator(.{}) = .init;
     defer if (is_debug) {
