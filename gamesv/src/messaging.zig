@@ -1,3 +1,5 @@
+const log = std.log.scoped(.@"remielle-gamesv::messaging");
+
 pub const handlers = @import("messaging/handlers.zig");
 pub const Xorpad = @import("messaging/Xorpad.zig");
 
@@ -22,10 +24,6 @@ pub const Header = struct {
             .head_len = readInt(u16, bytes[6..8], .big),
             .body_len = readInt(u32, bytes[8..12], .big),
         };
-    }
-
-    pub fn takeBody(header: *const Header, bytes: []u8) []u8 {
-        return bytes[size + header.head_len ..][0..header.body_len];
     }
 };
 
@@ -58,9 +56,41 @@ pub fn encode(
     try writer.writeInt(u32, 0x89ABCDEF, .big);
 }
 
+pub fn expectFirstPacket(
+    /// Used for copying strings for PlayerGetTokenCsReq decoding
+    /// ideally, we should introduce an option to protobuf decoder
+    /// for not copying strings which would be applicable in this case.
+    string_buffer: []u8,
+    /// Packet contents, *not* including kcp header
+    data: []u8,
+) !rmpb.main.PlayerGetTokenCsReq {
+    if (data.len < Header.size)
+        return error.SizeMismatch;
+
+    const header = try Header.decode(data[0..Header.size]);
+    if (header.head_len + header.body_len > data.len - Header.size)
+        return error.SizeMismatch;
+
+    if (header.cmd_id != rmpb.main_desc.PlayerGetTokenCsReq.cmd_id) {
+        log.debug("received unexpected first cmd_id: {d}", .{header.cmd_id});
+        return error.UnexpectedCmdId;
+    }
+
+    const body = data[Header.size + header.head_len ..][0..header.body_len];
+    Xorpad.initial.xor(.beginning, body);
+
+    var fba: heap.FixedBufferAllocator = .init(string_buffer);
+    var br: Io.Reader = .fixed(body);
+
+    return rmpb.decode(.main, rmpb.main.PlayerGetTokenCsReq, fba.allocator(), &br) catch
+        return error.MalformedPayload;
+}
+
 const readInt = std.mem.readInt;
 
 const Io = std.Io;
+
+const heap = std.heap;
 
 const rmcrypt = @import("rmcrypt");
 const rmpb = @import("rmpb");

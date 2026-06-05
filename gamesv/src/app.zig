@@ -143,37 +143,17 @@ pub fn bind(gpa: Allocator, csprng: Random, bind_address: *const posix.Sockaddr)
                 else => {},
             },
             .unauthenticated => |input| {
-                const data = buffer[kcp.Header.size..][0..input.header.len];
-                if (data.len < messaging.Header.size) continue; // ill-formed
+                var string_buffer: [1024]u8 = undefined;
 
-                const msg_header = messaging.Header.decode(data[0..messaging.Header.size]) catch |err| switch (err) {
-                    error.InvalidMagic => continue,
-                };
-
-                if (msg_header.head_len + msg_header.body_len > data.len - messaging.Header.size)
-                    continue;
-
-                if (msg_header.cmd_id != rmpb.main_desc.PlayerGetTokenCsReq.cmd_id) {
-                    log.debug(
-                        "received unexpected first cmd_id '{d}' from '{f}'",
-                        .{ msg_header.cmd_id, name },
-                    );
-                    continue;
-                }
-
-                // For strings inside of PlayerGetTokenCsReq
-                // ideally, we should introduce an option to protobuf decoder
-                // for not copying strings which would be applicable in this case.
-                var fb: [1024]u8 = undefined;
-                var fba: heap.FixedBufferAllocator = .init(&fb);
-
-                const body = msg_header.takeBody(data);
-                messaging.Xorpad.initial.xor(.beginning, body);
-
-                var br: std.Io.Reader = .fixed(body);
-                const request = rmpb.decode(.main, rmpb.main.PlayerGetTokenCsReq, fba.allocator(), &br) catch {
-                    log.debug("received malformed PlayerGetTokenCsReq from '{f}'", .{name});
-                    continue;
+                const request = messaging.expectFirstPacket(
+                    &string_buffer,
+                    buffer[kcp.Header.size..][0..input.header.len],
+                ) catch |err| switch (err) {
+                    error.SizeMismatch,
+                    error.InvalidMagic,
+                    error.UnexpectedCmdId,
+                    error.MalformedPayload,
+                    => continue,
                 };
 
                 const client_rand_key = decryptClientRandKey(request.client_rand_key) orelse {
