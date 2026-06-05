@@ -16,10 +16,10 @@ pub const Offset = enum(usize) {
     }
 };
 
-pub const RandKey = enum(u64) {
+pub const Key = enum(u64) {
     _,
 
-    pub inline fn init(client: u64, server: u64) RandKey {
+    pub inline fn init(client: u64, server: u64) Key {
         return @enumFromInt(client ^ server);
     }
 };
@@ -37,8 +37,8 @@ pub fn wrapReader(xp: *const Xorpad, reader: *Io.Reader, limit: usize) Reader {
     return .init(xp, reader, limit);
 }
 
-pub fn fillSeeded(xp: *Xorpad, seed: RandKey) void {
-    var mt: rmcrypt.prng.MT19937 = .init(@intFromEnum(seed));
+pub fn fillSeeded(xp: *Xorpad, key: Key) void {
+    var mt: rmcrypt.prng.MT19937 = .init(@intFromEnum(key));
     for (0..size >> 3) |i|
         std.mem.writeInt(u64, xp.bytes[i * 8 ..][0..8], mt.get(), .big);
 }

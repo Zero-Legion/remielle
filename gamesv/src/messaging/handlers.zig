@@ -188,11 +188,11 @@ fn sendDummy(server: *kcp.Server, cvars: *ClientVariables, client: u32, packet_i
 
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
-const ClientVariables = app.ClientVariables;
+const ClientVariables = Server.ClientVariables;
 
 const posix = rmio.posix;
 
-const app = @import("../app.zig");
+const Server = @import("../Server.zig");
 const kcp = @import("../kcp.zig");
 const messaging = @import("../messaging.zig");
 

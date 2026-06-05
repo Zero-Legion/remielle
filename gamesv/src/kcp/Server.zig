@@ -175,9 +175,27 @@ const Conversations = struct {
     rx_rto: []kcp.Timeval,
 
     const Rings = struct {
+        node: SinglyLinkedList.Node,
         send: SendRing,
         recv: RecvRing,
         ack: AckRing,
+
+        const Pool = struct {
+            pub const init: Pool = .{ .free = .{} };
+
+            free: SinglyLinkedList,
+
+            pub fn create(pool: *Pool, arena: Allocator) Allocator.Error!*Rings {
+                if (pool.free.popFirst()) |node|
+                    return @alignCast(@fieldParentPtr("node", node));
+
+                return arena.create(Rings);
+            }
+
+            pub inline fn recycle(pool: *Pool, rings: *Rings) void {
+                pool.free.prepend(&rings.node);
+            }
+        };
     };
 
     const OptionalIndex = enum(u32) {
@@ -213,35 +231,25 @@ const Conversations = struct {
     }
 };
 
-arena: heap.ArenaAllocator,
 conversations: Conversations,
 free: Conversations.List,
-rings_pool: heap.MemoryPool(Conversations.Rings),
+rings_pool: Conversations.Rings.Pool,
 
-pub fn initAlloc(uninit: *Server, gpa: Allocator, slots: usize) Allocator.Error!void {
-    uninit.arena = .init(gpa);
-    errdefer uninit.arena.deinit();
-
-    try uninit.conversations.initAlloc(uninit.arena.allocator(), slots);
+pub fn initAlloc(uninit: *Server, arena: Allocator, slots: usize) Allocator.Error!void {
+    try uninit.conversations.initAlloc(arena, slots);
     uninit.free = .{ .head = @enumFromInt(0) };
-
-    uninit.rings_pool = .empty;
-}
-
-pub fn deinit(server: *Server) void {
-    server.rings_pool.deinit(server.arena.child_allocator);
-    server.arena.deinit();
+    uninit.rings_pool = .init;
 }
 
 pub fn release(server: *Server, conv_idx: u32) void {
-    server.rings_pool.destroy(@alignCast(server.conversations.rings[conv_idx]));
-
+    server.rings_pool.recycle(server.conversations.rings[conv_idx]);
     server.conversations.nodes[conv_idx].next = server.free.head;
     server.free.head = @enumFromInt(conv_idx);
 }
 
 pub fn create(
     server: *Server,
+    arena: Allocator,
     conv_id: kcp.ConvId,
     token: kcp.Token,
     start_time: posix.timespec,
@@ -261,7 +269,7 @@ pub fn create(
         server.free.head = @enumFromInt(index);
     }
 
-    const rings = try server.rings_pool.create(server.arena.child_allocator);
+    const rings = try server.rings_pool.create(arena);
     errdefer comptime unreachable;
 
     rings.send.reset();
@@ -656,6 +664,7 @@ pub fn update(s: *Server, client: u32, current_time: posix.timespec) void {
 
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
+const SinglyLinkedList = std.SinglyLinkedList;
 
 const posix = rmio.posix;
 const heap = std.heap;
