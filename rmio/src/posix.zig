@@ -18,12 +18,46 @@ pub const WriteVError = error{
     PermissionDenied,
     BrokenPipe,
     DeviceBusy,
+    SystemResources,
+    LockViolation,
 };
 
 pub fn writev(file: fd_t, iovecs: []const iovec_const) WriteVError!usize {
     if (native_os == .windows) {
-        // TODO: loop over NtWriteFile/WriteFile
-        @compileError("TODO writev windows");
+        var n_write: usize = 0;
+        var iosb: sys.IO_STATUS_BLOCK = undefined;
+        var i: usize = 0;
+
+        while (i < iovecs.len) : (i += 1) {
+            switch (sys.NtWriteFile(
+                file,
+                null, // Event
+                null, // ApcRoutine
+                null, // ApcContext
+                &iosb,
+                iovecs[i].base,
+                iovecs[i].len,
+                null, // ByteOffset
+                null, // Key
+            )) {
+                .SUCCESS => {
+                    n_write += iosb.Information;
+
+                    if (iosb.Information < iovecs[i].len)
+                        // Short write encountered; it's better to break out of this loop now
+                        // to avoid unnecessary blocking. Let the caller decide what to do.
+                        break;
+                },
+                .NO_MEMORY, .QUOTA_EXCEEDED, .WORKING_SET_QUOTA => return error.SystemResources,
+                .PIPE_BROKEN => return error.BrokenPipe,
+                .ACCESS_DENIED => return error.PermissionDenied,
+                .DISK_FULL => return error.NoSpaceLeft,
+                .FILE_LOCK_CONFLICT => return error.LockViolation,
+                else => |e| unexpectedErrno(e),
+            }
+        }
+
+        return n_write;
     }
 
     const rc = sys.writev(file, iovecs.ptr, @truncate(iovecs.len));

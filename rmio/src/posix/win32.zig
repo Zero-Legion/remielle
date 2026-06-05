@@ -88,6 +88,10 @@ pub const iovec_const = extern struct {
     base: [*]const u8,
 };
 
+pub const IO_STATUS_BLOCK = windows.IO_STATUS_BLOCK;
+
+pub const NtWriteFile = windows.ntdll.NtWriteFile;
+
 pub extern "advapi32" fn SystemFunction036(output: [*]u8, length: ULONG) callconv(.winapi) BOOL;
 pub const RtlGenRandom = SystemFunction036;
 
