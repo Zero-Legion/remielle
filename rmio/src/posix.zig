@@ -7,6 +7,40 @@
 //! This namespace allows programmers to write *truly* optimal, reusable code while
 //! participating in these operations.
 
+pub const fd_t = sys.fd_t;
+
+pub const WriteVError = error{
+    WouldBlock,
+    DiskQuota,
+    FileTooBig,
+    InputOutput,
+    NoSpaceLeft,
+    PermissionDenied,
+    BrokenPipe,
+    DeviceBusy,
+};
+
+pub fn writev(file: fd_t, iovecs: []const iovec_const) WriteVError!usize {
+    if (native_os == .windows) {
+        // TODO: loop over NtWriteFile/WriteFile
+        @compileError("TODO writev windows");
+    }
+
+    const rc = sys.writev(file, iovecs.ptr, @truncate(iovecs.len));
+    return switch (sys.errno(rc)) {
+        .SUCCESS => @intCast(rc),
+        .AGAIN => error.WouldBlock,
+        .DQUOT => error.DiskQuota,
+        .FBIG => error.FileTooBig,
+        .IO => error.InputOutput,
+        .NOSPC => error.NoSpaceLeft,
+        .PERM => error.PermissionDenied,
+        .PIPE => error.BrokenPipe,
+        .BUSY => error.DeviceBusy,
+        else => |e| unexpectedErrno(e),
+    };
+}
+
 pub const AF = enum(u32) {
     INET = sys.AF.INET,
     UNIX = sys.AF.UNIX,
