@@ -87,6 +87,26 @@ pub fn writev(file: fd_t, iovecs: []const iovec_const) WriteVError!usize {
     };
 }
 
+pub const Sigaction = switch (native_os) {
+    else => sys.Sigaction,
+};
+
+pub const SIG = switch (native_os) {
+    else => sys.SIG,
+};
+
+pub fn sigaction(sig: SIG, act: ?*const Sigaction, oldact: ?*Sigaction) void {
+    if (native_os == .windows) {
+        // TODO: emulate through SetConsoleCtrlHandler
+        return;
+    }
+
+    switch (sys.errno(sys.sigaction(sig, act, oldact))) {
+        .SUCCESS => {},
+        else => |e| unexpectedErrno(e),
+    }
+}
+
 pub const AF = enum(u32) {
     INET = sys.AF.INET,
     UNIX = sys.AF.UNIX,
