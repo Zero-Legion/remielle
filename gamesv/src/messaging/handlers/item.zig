@@ -1,17 +1,17 @@
-pub fn getWeaponData(request: handlers.Request(.GetWeaponDataCsReq)) !void {
-    try request.respond(.GetWeaponDataScRsp, .init);
+pub fn getWeaponData(txn: handlers.Transaction(.GetWeaponDataCsReq)) !void {
+    try txn.respond(.init);
 }
 
-pub fn getEquipData(request: handlers.Request(.GetEquipDataCsReq)) !void {
-    try request.respond(.GetEquipDataScRsp, .init);
+pub fn getEquipData(txn: handlers.Transaction(.GetEquipDataCsReq)) !void {
+    try txn.respond(.init);
 }
 
-pub fn getItemData(request: handlers.Request(.GetItemDataCsReq)) !void {
-    try request.respond(.GetItemDataScRsp, .init);
+pub fn getItemData(txn: handlers.Transaction(.GetItemDataCsReq)) !void {
+    try txn.respond(.init);
 }
 
-pub fn getWishlistData(request: handlers.Request(.GetWishlistDataCsReq)) !void {
-    try request.respond(.GetWishlistDataScRsp, .init);
+pub fn getWishlistData(txn: handlers.Transaction(.GetWishlistDataCsReq)) !void {
+    try txn.respond(.init);
 }
 
 const handlers = @import("../handlers.zig");

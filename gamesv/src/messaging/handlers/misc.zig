@@ -1,10 +1,10 @@
-pub fn getServerTimestamp(request: handlers.Request(.GetServerTimestampCsReq)) !void {
-    try request.respond(.GetServerTimestampScRsp, .{
-        .timestamp = @intCast(posix.timespecToMs(request.time)),
+pub fn getServerTimestamp(txn: handlers.Transaction(.GetServerTimestampCsReq)) !void {
+    try txn.respond(.{
+        .timestamp = @intCast(posix.timespecToMs(txn.time)),
     });
 }
 
-pub fn getMiscData(request: handlers.Request(.GetMiscDataCsReq)) !void {
+pub fn getMiscData(txn: handlers.Transaction(.GetMiscDataCsReq)) !void {
     const unlocked_list: std.ArrayList(i32) = .{ .items = @constCast(unlock_ids), .capacity = unlock_ids.len };
 
     var post_girls_buffer: [1]pb.PostGirlItem = undefined;
@@ -16,7 +16,7 @@ pub fn getMiscData(request: handlers.Request(.GetMiscDataCsReq)) !void {
 
     post_girls.appendAssumeCapacity(.{ .id = 3500001 });
 
-    try request.respond(.GetMiscDataScRsp, .{ .data = .{
+    try txn.respond(.{ .data = .{
         .unlock = .{ .unlocked_list = unlocked_list },
         .post_girl = .{
             .post_girl_item_list = post_girls,

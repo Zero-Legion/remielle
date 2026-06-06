@@ -81,7 +81,7 @@ pub fn process(
                     .multi_conversation = multi_conversation,
                     .cvars = cvars,
                     .time = time,
-                    .client = client,
+                    .client_index = client,
                     .packet_id = head.packet_id,
                 };
 
@@ -97,47 +97,63 @@ pub fn process(
 
 pub const SendMessageError = error{MessageOversize};
 
-pub fn Request(comptime message_name: @EnumLiteral()) type {
+pub fn Transaction(comptime message_name: @EnumLiteral()) type {
     return struct {
-        const R = @This();
+        const Txn = @This();
 
         pub const Body = @field(rmpb.main, @tagName(message_name));
+
+        pub const Response = Response: {
+            const request_suffix = "CsReq";
+            const response_suffix = "ScRsp";
+
+            const name = @tagName(message_name);
+
+            if (std.mem.endsWith(u8, name, request_suffix)) {
+                const response_name = name[0 .. name.len - request_suffix.len] ++ response_suffix;
+                if (@hasDecl(rmpb.main, response_name))
+                    break :Response @field(rmpb.main, response_name);
+            }
+
+            break :Response noreturn;
+        };
+
         pub const cmd_id = rmpb.cmdId(Body);
 
         body: *const Body,
         multi_conversation: *kcp.MultiConversation,
         cvars: *ClientVariables,
         time: posix.timespec,
-        client: u32,
+        client_index: u32,
         packet_id: u32,
 
         pub fn respond(
-            r: *const R,
-            comptime response_name: @EnumLiteral(),
-            rsp: @field(rmpb.main, @tagName(response_name)),
+            txn: *const Txn,
+            rsp: Response,
         ) SendMessageError!void {
-            const id = comptime rmpb.cmdId(@TypeOf(rsp)) orelse {
-                try sendDummy(r.multi_conversation, r.cvars, r.client, r.packet_id);
+            const id = comptime rmpb.cmdId(Response) orelse {
+                try sendDummy(txn.multi_conversation, txn.cvars, txn.client_index, txn.packet_id);
                 return;
             };
 
-            defer r.cvars.packet_id_counters[r.client] += 1;
-            try sendMessage(r.multi_conversation, &r.cvars.xorpads[r.client], r.client, .{
-                .packet_id = r.cvars.packet_id_counters[r.client],
-                .ack_packet_id = r.packet_id,
+            defer txn.cvars.packet_id_counters[txn.client_index] += 1;
+
+            try sendMessage(txn.multi_conversation, &txn.cvars.xorpads[txn.client_index], txn.client_index, .{
+                .packet_id = txn.cvars.packet_id_counters[txn.client_index],
+                .ack_packet_id = txn.packet_id,
             }, id, rsp);
         }
 
         pub fn notify(
-            r: *const R,
+            txn: *const Txn,
             comptime ntf_name: @EnumLiteral(),
             ntf: @field(rmpb.main, @tagName(ntf_name)),
         ) SendMessageError!void {
             const id = comptime rmpb.cmdId(@TypeOf(ntf)) orelse return;
 
-            defer r.cvars.packet_id_counters[r.client] += 1;
-            try sendMessage(r.multi_conversation, &r.cvars.xorpads[r.client], r.client, .{
-                .packet_id = r.cvars.packet_id_counters[r.client],
+            defer txn.cvars.packet_id_counters[txn.client_index] += 1;
+            try sendMessage(txn.multi_conversation, &txn.cvars.xorpads[txn.client_index], txn.client_index, .{
+                .packet_id = txn.cvars.packet_id_counters[txn.client_index],
             }, id, ntf);
         }
     };

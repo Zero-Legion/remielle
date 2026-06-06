@@ -1,4 +1,4 @@
-pub fn getAvatarData(request: handlers.Request(.GetAvatarDataCsReq)) !void {
+pub fn getAvatarData(txn: handlers.Transaction(.GetAvatarDataCsReq)) !void {
     var avatars_buffer: [1]pb.AvatarInfo = undefined;
     var avatars: std.ArrayList(pb.AvatarInfo) = .initBuffer(&avatars_buffer);
 
@@ -26,7 +26,7 @@ pub fn getAvatarData(request: handlers.Request(.GetAvatarDataCsReq)) !void {
         .is_favorite = true,
     });
 
-    try request.respond(.GetAvatarDataScRsp, .{ .avatar_list = avatars });
+    try txn.respond(.{ .avatar_list = avatars });
 }
 
 const SkillType = enum(u32) {
