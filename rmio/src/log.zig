@@ -53,21 +53,20 @@ const Writer = struct {
                 else => amortize_splat: switch (pattern.len) {
                     0 => {},
                     1 => {
-                        const memset_len = @min(splat_backup_buffer.len, splat);
                         @memset(&splat_backup_buffer, pattern[0]);
-                        var remaining_splat = splat - memset_len;
+                        var remaining_splat = splat;
 
-                        while (remaining_splat >= splat_backup_buffer.len) {
+                        while (remaining_splat >= splat_backup_buffer.len) : (remaining_splat -= splat_backup_buffer.len) {
                             if (!addVec(&iovecs_buffer, &iovecs_count, &splat_backup_buffer))
                                 // Ran out of iovecs
                                 break :amortize_splat;
-
-                            remaining_splat -= splat_backup_buffer.len;
                         }
 
                         _ = addVec(&iovecs_buffer, &iovecs_count, splat_backup_buffer[0..remaining_splat]);
                     },
-                    else => while (addVec(&iovecs_buffer, &iovecs_count, pattern)) {},
+                    else => for (0..splat) |_|
+                        if (!addVec(&iovecs_buffer, &iovecs_count, pattern))
+                            break :amortize_splat,
                 },
             };
         }
@@ -92,7 +91,9 @@ const Writer = struct {
     }
 
     fn addVec(iovecs: []posix.iovec_const, count: *usize, data: []const u8) bool {
-        if (data.len == 0 or iovecs.len == count.*) return false;
+        if (data.len == 0) return true;
+        if (iovecs.len == count.*) return false;
+
         defer count.* += 1;
 
         iovecs[count.*] = .{ .base = data.ptr, .len = @intCast(data.len) };
