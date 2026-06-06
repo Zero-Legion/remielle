@@ -139,8 +139,12 @@ pub fn Transaction(comptime message_name: @EnumLiteral()) type {
             txn: *const Txn,
             rsp: Response,
         ) SendMessageError!void {
-            const id = comptime rmpb.cmdId(Response) orelse {
+            const id = (comptime rmpb.cmdId(Response)) orelse {
                 try sendDummy(txn.multi_conversation, txn.cvars, txn.client_index, txn.packet_id);
+                log.debug(
+                    "response of type " ++ @typeName(Response) ++ " is not described; sent dummy to {f}",
+                    .{txn.cvars.addrs[txn.client_index]},
+                );
                 return;
             };
 
@@ -162,7 +166,10 @@ pub fn Transaction(comptime message_name: @EnumLiteral()) type {
             comptime ntf_name: @EnumLiteral(),
             ntf: @field(rmpb.main, @tagName(ntf_name)),
         ) SendMessageError!void {
-            const id = comptime rmpb.cmdId(@TypeOf(ntf)) orelse return;
+            const id = (comptime rmpb.cmdId(@TypeOf(ntf))) orelse {
+                log.debug("notify of type " ++ @typeName(Response) ++ " is not described", .{});
+                return;
+            };
 
             defer txn.cvars.packet_id_counters[txn.client_index] += 1;
             try sendMessage(txn.multi_conversation, &txn.cvars.xorpads[txn.client_index], txn.client_index, .{
