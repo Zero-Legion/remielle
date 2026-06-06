@@ -24,7 +24,7 @@ pub fn getMiscData(request: handlers.Request(.GetMiscDataCsReq)) !void {
         },
         .business_card = .init,
         .player_accessory = .{
-            .control_guise_avatar_id = 1561,
+            .control_guise_avatar_id = 1571,
         },
     } });
 }

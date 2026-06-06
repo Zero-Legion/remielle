@@ -4,7 +4,7 @@ pub fn enterWorld(request: handlers.Request(.EnterWorldCsReq)) !void {
         .hall_scene_data = .{
             .section_id = 1,
             .control_avatar_id = 2011,
-            .control_guise_avatar_id = 1561,
+            .control_guise_avatar_id = 1571,
         },
     } });
 

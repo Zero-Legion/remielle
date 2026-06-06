@@ -17,7 +17,7 @@ pub fn getAvatarData(request: handlers.Request(.GetAvatarDataCsReq)) !void {
     });
 
     avatars.appendAssumeCapacity(.{
-        .id = 1561,
+        .id = 1571,
         .level = 60,
         .rank = 6,
         .unlocked_talent_num = 6,

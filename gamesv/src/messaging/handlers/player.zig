@@ -9,7 +9,7 @@ pub fn getSelfBasicInfo(request: handlers.Request(.GetSelfBasicInfoCsReq)) !void
         .name_change_times = 1,
         .avatar_id = 2011,
         .control_avatar_id = 2011,
-        .control_guise_avatar_id = 1561,
+        .control_guise_avatar_id = 1571,
     } });
 }
 
