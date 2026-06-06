@@ -1,13 +1,13 @@
 const stable_protos: []const []const u8 = &.{
-    "rmpb/cs_proto/head.proto",
+    "nrmpb/cs_proto/head.proto",
 };
 
 pub fn build(b: *Build) void {
-    const rmio = b.createModule(.{ .root_source_file = b.path("rmio/src/root.zig") });
-    const rmcli = b.createModule(.{ .root_source_file = b.path("rmcli/src/root.zig") });
-    const rmcrypt = b.createModule(.{ .root_source_file = b.path("rmcrypt/src/root.zig") });
+    const nrmio = b.createModule(.{ .root_source_file = b.path("nrmio/src/root.zig") });
+    const nrmcli = b.createModule(.{ .root_source_file = b.path("nrmcli/src/root.zig") });
+    const nrmcrypt = b.createModule(.{ .root_source_file = b.path("nrmcrypt/src/root.zig") });
 
-    const rmpb = b.createModule(.{ .root_source_file = b.path("rmpb/src/root.zig") });
+    const nrmpb = b.createModule(.{ .root_source_file = b.path("nrmpb/src/root.zig") });
 
     const host = b.graph.host;
     const target = b.standardTargetOptions(.{});
@@ -16,10 +16,10 @@ pub fn build(b: *Build) void {
     const io = b.graph.io;
     const cwd: Io.Dir = .cwd();
 
-    const rmprotoc = b.addExecutable(.{
-        .name = "rmprotoc",
+    const nrmprotoc = b.addExecutable(.{
+        .name = "nrmprotoc",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("rmpb/compiler/main.zig"),
+            .root_source_file = b.path("nrmpb/compiler/main.zig"),
             .target = host,
             .optimize = optimize,
             .single_threaded = true,
@@ -30,50 +30,50 @@ pub fn build(b: *Build) void {
     const compile_main_descriptors = b.addUpdateSourceFiles();
     const compile_stable_definitions = b.addUpdateSourceFiles();
 
-    if (cwd.access(io, "rmpb/cs_proto/main.proto", .{ .read = true })) {
-        const rmprotoc_descs_pass = b.addRunArtifact(rmprotoc);
-        rmprotoc_descs_pass.expectExitCode(0);
-        rmprotoc_descs_pass.addArg("-descriptors");
-        rmprotoc_descs_pass.addFileArg(b.path("rmpb/cs_proto/main.proto"));
+    if (cwd.access(io, "nrmpb/cs_proto/main.proto", .{ .read = true })) {
+        const nrmprotoc_descs_pass = b.addRunArtifact(nrmprotoc);
+        nrmprotoc_descs_pass.expectExitCode(0);
+        nrmprotoc_descs_pass.addArg("-descriptors");
+        nrmprotoc_descs_pass.addFileArg(b.path("nrmpb/cs_proto/main.proto"));
 
         compile_main_descriptors.addCopyFileToSource(
-            rmprotoc_descs_pass.captureStdOut(.{ .basename = "pb.main.desc.zig" }),
-            "rmpb/src/pb.main.desc.zig",
+            nrmprotoc_descs_pass.captureStdOut(.{ .basename = "pb.main.desc.zig" }),
+            "nrmpb/src/pb.main.desc.zig",
         );
 
-        const rmprotoc_structs_pass = b.addRunArtifact(rmprotoc);
-        rmprotoc_structs_pass.expectExitCode(0);
-        rmprotoc_structs_pass.addArg("-structures");
-        rmprotoc_structs_pass.addFileArg(b.path("rmpb/cs_proto/main.proto"));
+        const nrmprotoc_structs_pass = b.addRunArtifact(nrmprotoc);
+        nrmprotoc_structs_pass.expectExitCode(0);
+        nrmprotoc_structs_pass.addArg("-structures");
+        nrmprotoc_structs_pass.addFileArg(b.path("nrmpb/cs_proto/main.proto"));
 
         compile_main_structs.addCopyFileToSource(
-            rmprotoc_structs_pass.captureStdOut(.{ .basename = "pb.main.zig" }),
-            "rmpb/src/pb.main.zig",
+            nrmprotoc_structs_pass.captureStdOut(.{ .basename = "pb.main.zig" }),
+            "nrmpb/src/pb.main.zig",
         );
     } else |_| {}
 
     if (filesReadable(io, cwd, stable_protos)) {
-        const rmprotoc_stable_pass = b.addRunArtifact(rmprotoc);
-        rmprotoc_stable_pass.expectExitCode(0);
-        rmprotoc_stable_pass.addArg("-full");
+        const nrmprotoc_stable_pass = b.addRunArtifact(nrmprotoc);
+        nrmprotoc_stable_pass.expectExitCode(0);
+        nrmprotoc_stable_pass.addArg("-full");
 
         for (stable_protos) |sub_path|
-            rmprotoc_stable_pass.addFileArg(b.path(sub_path));
+            nrmprotoc_stable_pass.addFileArg(b.path(sub_path));
 
         compile_stable_definitions.addCopyFileToSource(
-            rmprotoc_stable_pass.captureStdOut(.{ .basename = "pb.stable.zig" }),
-            "rmpb/src/pb.stable.zig",
+            nrmprotoc_stable_pass.captureStdOut(.{ .basename = "pb.stable.zig" }),
+            "nrmpb/src/pb.stable.zig",
         );
     }
 
     const dpsv = b.addExecutable(.{
-        .name = "remielle-dpsv",
+        .name = "hollowell-dpsv",
         .root_module = b.createModule(.{
             .root_source_file = b.path("dpsv/src/main.zig"),
             .imports = &.{
-                .{ .name = "rmio", .module = rmio },
-                .{ .name = "rmcli", .module = rmcli },
-                .{ .name = "rmcrypt", .module = rmcrypt },
+                .{ .name = "nrmio", .module = nrmio },
+                .{ .name = "nrmcli", .module = nrmcli },
+                .{ .name = "nrmcrypt", .module = nrmcrypt },
             },
             .target = target,
             .optimize = optimize,
@@ -85,14 +85,14 @@ pub fn build(b: *Build) void {
     });
 
     const gamesv = b.addExecutable(.{
-        .name = "remielle-gamesv",
+        .name = "hollowell-gamesv",
         .root_module = b.createModule(.{
             .root_source_file = b.path("gamesv/src/main.zig"),
             .imports = &.{
-                .{ .name = "rmio", .module = rmio },
-                .{ .name = "rmcli", .module = rmcli },
-                .{ .name = "rmcrypt", .module = rmcrypt },
-                .{ .name = "rmpb", .module = rmpb },
+                .{ .name = "nrmio", .module = nrmio },
+                .{ .name = "nrmcli", .module = nrmcli },
+                .{ .name = "nrmcrypt", .module = nrmcrypt },
+                .{ .name = "nrmpb", .module = nrmpb },
             },
             .target = target,
             .optimize = optimize,

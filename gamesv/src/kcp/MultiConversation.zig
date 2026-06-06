@@ -702,12 +702,12 @@ const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const SinglyLinkedList = std.SinglyLinkedList;
 
-const posix = rmio.posix;
+const posix = nrmio.posix;
 const heap = std.heap;
 const debug = std.debug;
 
 const kcp = @import("../kcp.zig");
 
-const rmio = @import("rmio");
+const nrmio = @import("nrmio");
 const std = @import("std");
 const MultiConversation = @This();

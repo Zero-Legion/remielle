@@ -84,7 +84,7 @@ pub const Timeval = packed struct {
 
 const Io = std.Io;
 
-const posix = rmio.posix;
+const posix = nrmio.posix;
 
-const rmio = @import("rmio");
+const nrmio = @import("nrmio");
 const std = @import("std");

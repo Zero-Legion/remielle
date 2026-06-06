@@ -1,4 +1,4 @@
-const log = std.log.scoped(.@"remielle-dpsv");
+const log = std.log.scoped(.@"hollowell-dpsv");
 
 const accept_backlog: u31 = 100;
 const buffer_size: usize = 8192;
@@ -304,7 +304,7 @@ fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
     std.process.exit(1);
 }
 
-const posix = rmio.posix;
+const posix = nrmio.posix;
 const Allocator = std.mem.Allocator;
 
 const debug = std.debug;
@@ -313,5 +313,5 @@ const Data = @import("Data.zig");
 const http = @import("http.zig");
 const routes = @import("routes.zig");
 
-const rmio = @import("rmio");
+const nrmio = @import("nrmio");
 const std = @import("std");

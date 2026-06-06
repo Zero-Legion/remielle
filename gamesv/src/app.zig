@@ -1,4 +1,4 @@
-const log = std.log.scoped(.@"remielle-gamesv");
+const log = std.log.scoped(.@"hollowell-gamesv");
 
 pub fn bind(gpa: Allocator, csprng: Random, bind_address: *const posix.Sockaddr) u8 {
     const server_fd = posix.socket(.INET, .init(.DGRAM, .flags(.{ .CLOEXEC = true })), .UDP) catch |err|
@@ -235,12 +235,12 @@ fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
 const Random = std.Random;
 const Allocator = std.mem.Allocator;
 
-const posix = rmio.posix;
+const posix = nrmio.posix;
 const heap = std.heap;
 
 const kcp = @import("kcp.zig");
 const Server = @import("Server.zig");
 const messaging = @import("messaging.zig");
 
-const rmio = @import("rmio");
+const nrmio = @import("nrmio");
 const std = @import("std");

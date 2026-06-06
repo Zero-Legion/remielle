@@ -1,4 +1,4 @@
-const log = std.log.scoped(.@"remielle-dpsv");
+const log = std.log.scoped(.@"hollowell-dpsv");
 
 pub const Options = struct {
     slots: u32 = @import("config").slots,
@@ -6,7 +6,7 @@ pub const Options = struct {
 };
 
 pub const std_options: std.Options = .{
-    .logFn = rmio.log.logFn,
+    .logFn = nrmio.log.logFn,
 };
 
 pub fn main(init: Init.Minimal) u8 {
@@ -26,10 +26,10 @@ pub fn main(init: Init.Minimal) u8 {
     const args = init.args.toSlice(arena.allocator()) catch |err|
         fatal("failed to collect cli arguments: {t}", .{err});
 
-    var options_err: rmcli.opt.ErrorDescription = undefined;
-    const options = rmcli.opt.parse(Options, args[1..], &options_err) orelse fatal(
+    var options_err: nrmcli.opt.ErrorDescription = undefined;
+    const options = nrmcli.opt.parse(Options, args[1..], &options_err) orelse fatal(
         "{f}\nusage: {s} {f}",
-        .{ options_err, args[0], rmcli.opt.Usage(Options) },
+        .{ options_err, args[0], nrmcli.opt.Usage(Options) },
     );
 
     const listen_address = posix.Sockaddr.parseIp4(options.listen_address) catch |err| {
@@ -53,7 +53,7 @@ const is_debug = builtin.mode == .Debug;
 
 const Init = std.process.Init;
 
-const posix = rmio.posix;
+const posix = nrmio.posix;
 const heap = std.heap;
 const net = std.Io.net;
 const exit = std.process.exit;
@@ -62,6 +62,6 @@ const app = @import("app.zig");
 const Data = @import("Data.zig");
 
 const std = @import("std");
-const rmio = @import("rmio");
-const rmcli = @import("rmcli");
+const nrmio = @import("nrmio");
+const nrmcli = @import("nrmcli");
 const builtin = @import("builtin");

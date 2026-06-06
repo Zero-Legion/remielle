@@ -1,4 +1,4 @@
-const log = std.log.scoped(.@"remielle-gamesv::messaging");
+const log = std.log.scoped(.@"hollowell-gamesv::messaging");
 
 const namespaces: []const type = &.{
     @import("handlers/player.zig"),
@@ -69,7 +69,7 @@ pub fn process(
                 const R = fn_info.params[0].type.?;
                 if (@intFromEnum(id) != R.cmd_id) continue;
 
-                const body = rmpb.decode(
+                const body = nrmpb.decode(
                     .main,
                     R.Body,
                     arena,
@@ -109,7 +109,7 @@ pub fn Transaction(comptime message_name: @EnumLiteral()) type {
     return struct {
         const Txn = @This();
 
-        pub const Body = @field(rmpb.main, @tagName(message_name));
+        pub const Body = @field(nrmpb.main, @tagName(message_name));
 
         pub const Response = Response: {
             const request_suffix = "CsReq";
@@ -119,14 +119,14 @@ pub fn Transaction(comptime message_name: @EnumLiteral()) type {
 
             if (std.mem.endsWith(u8, name, request_suffix)) {
                 const response_name = name[0 .. name.len - request_suffix.len] ++ response_suffix;
-                if (@hasDecl(rmpb.main, response_name))
-                    break :Response @field(rmpb.main, response_name);
+                if (@hasDecl(nrmpb.main, response_name))
+                    break :Response @field(nrmpb.main, response_name);
             }
 
             break :Response noreturn;
         };
 
-        pub const cmd_id = rmpb.cmdId(Body);
+        pub const cmd_id = nrmpb.cmdId(Body);
 
         body: *const Body,
         multi_conversation: *kcp.MultiConversation,
@@ -139,7 +139,7 @@ pub fn Transaction(comptime message_name: @EnumLiteral()) type {
             txn: *const Txn,
             rsp: Response,
         ) SendMessageError!void {
-            const id = (comptime rmpb.cmdId(Response)) orelse {
+            const id = (comptime nrmpb.cmdId(Response)) orelse {
                 try sendDummy(txn.multi_conversation, txn.cvars, txn.client_index, txn.packet_id);
                 log.debug(
                     "response of type " ++ @typeName(Response) ++ " is not described; sent dummy to {f}",
@@ -164,9 +164,9 @@ pub fn Transaction(comptime message_name: @EnumLiteral()) type {
         pub fn notify(
             txn: *const Txn,
             comptime ntf_name: @EnumLiteral(),
-            ntf: @field(rmpb.main, @tagName(ntf_name)),
+            ntf: @field(nrmpb.main, @tagName(ntf_name)),
         ) SendMessageError!void {
-            const id = (comptime rmpb.cmdId(@TypeOf(ntf))) orelse {
+            const id = (comptime nrmpb.cmdId(@TypeOf(ntf))) orelse {
                 log.debug("notify of type " ++ @typeName(Response) ++ " is not described", .{});
                 return;
             };
@@ -188,7 +188,7 @@ fn sendMessage(
     multi_conversation: *kcp.MultiConversation,
     xorpad: *const messaging.Xorpad,
     client: u32,
-    head: rmpb.stable.PacketHead,
+    head: nrmpb.stable.PacketHead,
     cmd_id: u16,
     message: anytype,
 ) SendMessageError!void {
@@ -207,7 +207,7 @@ fn sendMessage(
 
 fn sendDummy(multi_conversation: *kcp.MultiConversation, cvars: *ClientVariables, client: u32, packet_id: u32) !void {
     const DummyCmd = comptime DummyCmd: {
-        const ns = rmpb.Descriptors.main.namespace();
+        const ns = nrmpb.Descriptors.main.namespace();
         const name = @import("config").dummy_cmd;
         if (!@hasDecl(ns, name))
             @compileError("the `dummy_cmd` is invalid");
@@ -228,12 +228,12 @@ const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const ClientVariables = Server.ClientVariables;
 
-const posix = rmio.posix;
+const posix = nrmio.posix;
 
 const Server = @import("../Server.zig");
 const kcp = @import("../kcp.zig");
 const messaging = @import("../messaging.zig");
 
-const rmio = @import("rmio");
-const rmpb = @import("rmpb");
+const nrmio = @import("nrmio");
+const nrmpb = @import("nrmpb");
 const std = @import("std");

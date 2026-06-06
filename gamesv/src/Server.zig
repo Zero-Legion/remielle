@@ -1,4 +1,4 @@
-const log = std.log.scoped(.@"remielle-gamesv");
+const log = std.log.scoped(.@"hollowell-gamesv");
 
 multi_conversation: kcp.MultiConversation,
 cvars: ClientVariables,
@@ -80,7 +80,7 @@ pub fn onAuthSucceeded(
     token: kcp.Token,
     current_time: posix.timespec,
     key: messaging.Xorpad.Key,
-    auth_response: rmpb.main.PlayerGetTokenScRsp,
+    auth_response: nrmpb.main.PlayerGetTokenScRsp,
 ) !void {
     const client = switch (try server.multi_conversation.create(arena, conv_id, token, current_time)) {
         .none => return error.SessionLimitExceeded, // TODO: evict a client
@@ -101,7 +101,7 @@ pub fn onAuthSucceeded(
     const length = messaging.encodingLength(.init, auth_response);
     var writer = try server.multi_conversation.writer(client, length);
 
-    const cmd_id = comptime rmpb.Descriptors.main.message(rmpb.main.PlayerGetTokenScRsp).?.descriptor.cmd_id;
+    const cmd_id = comptime nrmpb.Descriptors.main.message(nrmpb.main.PlayerGetTokenScRsp).?.descriptor.cmd_id;
     messaging.encode(&writer.interface, .initial, cmd_id, .init, auth_response) catch unreachable;
 
     server.conv_map.putAssumeCapacity(conv_id, client);
@@ -265,14 +265,14 @@ const Random = std.Random;
 const Allocator = std.mem.Allocator;
 
 const heap = std.heap;
-const posix = rmio.posix;
+const posix = nrmio.posix;
 const array_hash_map = std.array_hash_map;
 
 const kcp = @import("kcp.zig");
 const messaging = @import("messaging.zig");
 
-const rmio = @import("rmio");
-const rmpb = @import("rmpb");
+const nrmio = @import("nrmio");
+const nrmpb = @import("nrmpb");
 
 const std = @import("std");
 const Server = @This();

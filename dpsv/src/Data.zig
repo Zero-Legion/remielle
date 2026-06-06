@@ -107,22 +107,22 @@ fn buildGatewayMap(arena: Allocator) Allocator.Error!GatewayMap {
                 .{std.json.fmt(data, .{})},
             );
 
-            const num_blocks = std.math.divCeil(usize, plaintext.len, rmcrypt.rsa.max_unpadded_size) catch
+            const num_blocks = std.math.divCeil(usize, plaintext.len, nrmcrypt.rsa.max_unpadded_size) catch
                 unreachable; // `max_unpadded_size` is nonzero.
 
-            const blocks = try arena.alloc(u8, num_blocks * rmcrypt.rsa.block_size);
+            const blocks = try arena.alloc(u8, num_blocks * nrmcrypt.rsa.block_size);
             for (0..num_blocks) |n| {
-                var plain_block = plaintext[n * rmcrypt.rsa.max_unpadded_size ..];
-                plain_block.len = @min(plain_block.len, rmcrypt.rsa.max_unpadded_size);
+                var plain_block = plaintext[n * nrmcrypt.rsa.max_unpadded_size ..];
+                plain_block.len = @min(plain_block.len, nrmcrypt.rsa.max_unpadded_size);
 
-                rmcrypt.rsa.client_public_key.encrypt(
+                nrmcrypt.rsa.client_public_key.encrypt(
                     plain_block,
-                    blocks[n * rmcrypt.rsa.block_size ..][0..rmcrypt.rsa.block_size],
+                    blocks[n * nrmcrypt.rsa.block_size ..][0..nrmcrypt.rsa.block_size],
                 );
             }
 
-            var sign: [rmcrypt.rsa.block_size]u8 = undefined;
-            rmcrypt.rsa.server_private_key.sign(plaintext, &sign);
+            var sign: [nrmcrypt.rsa.block_size]u8 = undefined;
+            nrmcrypt.rsa.server_private_key.sign(plaintext, &sign);
 
             map.putAssumeCapacity(
                 .{ .version = version_tag, .server = server_tag },
@@ -138,6 +138,6 @@ fn buildGatewayMap(arena: Allocator) Allocator.Error!GatewayMap {
 
 const Allocator = std.mem.Allocator;
 
-const rmcrypt = @import("rmcrypt");
+const nrmcrypt = @import("nrmcrypt");
 const std = @import("std");
 const Data = @This();
