@@ -88,16 +88,45 @@ pub fn writev(file: fd_t, iovecs: []const iovec_const) WriteVError!usize {
 }
 
 pub const Sigaction = switch (native_os) {
+    .windows => struct {
+        handler: extern union {
+            handler: *const fn (SIG) callconv(.c) void,
+        },
+        mask: [1]u8, // ignored
+        flags: u8, // ignored
+    },
     else => sys.Sigaction,
 };
 
 pub const SIG = switch (native_os) {
+    .windows => enum(u8) {
+        INT = 2,
+    },
     else => sys.SIG,
 };
 
 pub fn sigaction(sig: SIG, act: ?*const Sigaction, oldact: ?*Sigaction) void {
     if (native_os == .windows) {
-        // TODO: emulate through SetConsoleCtrlHandler
+        const inner = struct {
+            var console_ctrl_handler_set: bool = false;
+            var handlers: std.EnumMap(SIG, *const fn (SIG) callconv(.c) void) = .init(.{});
+
+            fn consoleCtrlHandler(_: std.os.windows.DWORD) callconv(.winapi) std.os.windows.BOOL {
+                if (handlers.get(.INT)) |handler|
+                    handler(.INT);
+
+                return .TRUE;
+            }
+        };
+
+        if (act) |new_act|
+            inner.handlers.put(sig, new_act.handler.handler);
+
+        if (!inner.console_ctrl_handler_set) {
+            inner.console_ctrl_handler_set = true;
+            _ = sys.SetConsoleCtrlHandler(inner.consoleCtrlHandler, .TRUE);
+        }
+
         return;
     }
 

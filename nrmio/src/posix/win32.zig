@@ -92,6 +92,11 @@ pub const IO_STATUS_BLOCK = windows.IO_STATUS_BLOCK;
 
 pub const NtWriteFile = windows.ntdll.NtWriteFile;
 
+pub extern "kernel32" fn SetConsoleCtrlHandler(
+    *const fn (dwCtrlType: DWORD) callconv(.winapi) BOOL,
+    BOOL,
+) callconv(.winapi) BOOL;
+
 pub extern "advapi32" fn SystemFunction036(output: [*]u8, length: ULONG) callconv(.winapi) BOOL;
 pub const RtlGenRandom = SystemFunction036;
 
@@ -725,6 +730,7 @@ pub const WinsockError = enum(u16) {
 
 const BOOL = windows.BOOL;
 const WORD = windows.WORD;
+const DWORD = windows.DWORD;
 const ULONG = windows.ULONG;
 const USHORT = windows.USHORT;
 
