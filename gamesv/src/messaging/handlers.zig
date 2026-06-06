@@ -48,11 +48,14 @@ pub fn process(
     const head = messaging.decodePacketHead(head_bytes) orelse
         return error.DecodeFail;
 
-    log.debug("received message with cmd_id {d} (packet_id: {d})", .{ msg_header.cmd_id, head.packet_id });
-
     var xored_reader = cvars.xorpads[client].wrapReader(reader, msg_header.body_len);
 
     const cmd_id = std.enums.fromInt(CmdId, msg_header.cmd_id) orelse {
+        log.warn(
+            "unhandled message with cmd_id {d} from {f}",
+            .{ msg_header.cmd_id, cvars.addrs[client] },
+        );
+
         if (head.packet_id == 0) return;
 
         try sendDummy(multi_conversation, cvars, client, head.packet_id);
@@ -88,6 +91,11 @@ pub fn process(
                 @field(ns, decl.name)(request) catch |err| switch (@as(ProcessError, err)) {
                     else => |e| return e,
                 };
+
+                log.debug(
+                    "processed message of type " ++ @typeName(R.Body) ++ " from {f}",
+                    .{cvars.addrs[client]},
+                );
 
                 break :lookup;
             }
@@ -142,6 +150,11 @@ pub fn Transaction(comptime message_name: @EnumLiteral()) type {
                 .packet_id = txn.cvars.packet_id_counters[txn.client_index],
                 .ack_packet_id = txn.packet_id,
             }, id, rsp);
+
+            log.debug(
+                "sent response of type " ++ @typeName(Response) ++ " to {f}",
+                .{txn.cvars.addrs[txn.client_index]},
+            );
         }
 
         pub fn notify(
@@ -155,6 +168,11 @@ pub fn Transaction(comptime message_name: @EnumLiteral()) type {
             try sendMessage(txn.multi_conversation, &txn.cvars.xorpads[txn.client_index], txn.client_index, .{
                 .packet_id = txn.cvars.packet_id_counters[txn.client_index],
             }, id, ntf);
+
+            log.debug(
+                "sent notify of type " ++ @typeName(@TypeOf(ntf)) ++ " to {f}",
+                .{txn.cvars.addrs[txn.client_index]},
+            );
         }
     };
 }
