@@ -129,14 +129,14 @@ pub fn bind(gpa: Allocator, csprng: Random, bind_address: *const posix.Sockaddr)
 
                 continue;
             },
-            error.MalformedPacket, error.InputFailed => continue,
+            error.MalformedPacket, error.FillFailed => continue,
         };
 
         switch (status) {
             .success => while (server.output.pop()) |index| drainOutgoingPackets(
                 server_fd,
                 current_time,
-                &server.kcp_server,
+                &server.multi_conversation,
                 index,
                 &name,
             ) catch |err| switch (err) {
@@ -194,7 +194,7 @@ pub fn bind(gpa: Allocator, csprng: Random, bind_address: *const posix.Sockaddr)
                 while (server.output.pop()) |index| drainOutgoingPackets(
                     server_fd,
                     current_time,
-                    &server.kcp_server,
+                    &server.multi_conversation,
                     index,
                     &name,
                 ) catch |err| switch (err) {
@@ -210,19 +210,19 @@ pub fn bind(gpa: Allocator, csprng: Random, bind_address: *const posix.Sockaddr)
 fn drainOutgoingPackets(
     server_fd: posix.socket_t,
     current_time: posix.timespec,
-    server: *kcp.Server,
+    multi_conversation: *kcp.MultiConversation,
     client: u32,
     destination: *const posix.Sockaddr,
 ) !void {
-    server.update(client, current_time);
+    multi_conversation.updateAt(client, current_time);
 
-    const send_ring = &server.conversations.rings[client].send;
+    const send_ring = &multi_conversation.storage.rings[client].send;
     const ring_head = send_ring.head;
     defer send_ring.head = ring_head;
 
     var output: [kcp.mtu]u8 = undefined;
     while (true) {
-        const n_send = server.drain(client, &output);
+        const n_send = multi_conversation.drainAt(client, &output);
         if (n_send == 0) break;
 
         const header: posix.msghdr_const = .{

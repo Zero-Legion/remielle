@@ -1,4 +1,4 @@
-// kcp/Server.zig - an implementation of "fast and reliable" ARQ protocol in zig.
+// kcp/MultiConversation.zig - an implementation of "fast and reliable" ARQ protocol in zig.
 //
 // CONTRIBUTORS:
 // xeondev (https://github.com/thexeondev)
@@ -161,7 +161,7 @@ const AckRing = struct {
     }
 };
 
-const Conversations = struct {
+const Storage = struct {
     ids: []kcp.ConvId,
     tokens: []kcp.Token,
     nodes: []List.Node,
@@ -217,11 +217,11 @@ const Conversations = struct {
     };
 
     pub fn initAlloc(
-        uninit: *Conversations,
+        uninit: *Storage,
         arena: Allocator,
         capacity: usize,
     ) Allocator.Error!void {
-        inline for (@typeInfo(Conversations).@"struct".fields) |field|
+        inline for (@typeInfo(Storage).@"struct".fields) |field|
             @field(uninit, field.name) = try arena.alloc(@typeInfo(field.type).pointer.child, capacity);
 
         for (uninit.nodes[0 .. capacity - 1], 1..) |*node, next|
@@ -231,66 +231,66 @@ const Conversations = struct {
     }
 };
 
-conversations: Conversations,
-free: Conversations.List,
-rings_pool: Conversations.Rings.Pool,
+storage: Storage,
+free: Storage.List,
+rings_pool: Storage.Rings.Pool,
 
-pub fn initAlloc(uninit: *Server, arena: Allocator, slots: usize) Allocator.Error!void {
-    try uninit.conversations.initAlloc(arena, slots);
+pub fn initAlloc(uninit: *MultiConversation, arena: Allocator, slots: usize) Allocator.Error!void {
+    try uninit.storage.initAlloc(arena, slots);
     uninit.free = .{ .head = @enumFromInt(0) };
     uninit.rings_pool = .init;
 }
 
-pub fn release(server: *Server, conv_idx: u32) void {
-    server.rings_pool.recycle(server.conversations.rings[conv_idx]);
-    server.conversations.nodes[conv_idx].next = server.free.head;
-    server.free.head = @enumFromInt(conv_idx);
+pub fn destroy(mc: *MultiConversation, conv_idx: u32) void {
+    mc.rings_pool.recycle(mc.storage.rings[conv_idx]);
+    mc.storage.nodes[conv_idx].next = mc.free.head;
+    mc.free.head = @enumFromInt(conv_idx);
 }
 
 pub fn create(
-    server: *Server,
+    mc: *MultiConversation,
     arena: Allocator,
     conv_id: kcp.ConvId,
     token: kcp.Token,
     start_time: posix.timespec,
-) Allocator.Error!Conversations.OptionalIndex {
-    const index = switch (server.free.head) {
+) Allocator.Error!Storage.OptionalIndex {
+    const index = switch (mc.free.head) {
         .none => return .none,
         _ => |free| free: {
             const index = free.toInt();
-            server.free.head = server.conversations.nodes[index].next;
-            server.conversations.nodes[index].next = .none;
+            mc.free.head = mc.storage.nodes[index].next;
+            mc.storage.nodes[index].next = .none;
             break :free index;
         },
     };
 
     errdefer {
-        server.conversations.nodes[index].next = server.free.head;
-        server.free.head = @enumFromInt(index);
+        mc.storage.nodes[index].next = mc.free.head;
+        mc.free.head = @enumFromInt(index);
     }
 
-    const rings = try server.rings_pool.create(arena);
+    const rings = try mc.rings_pool.create(arena);
     errdefer comptime unreachable;
 
     rings.send.reset();
     rings.recv.reset();
     rings.ack.reset();
-    server.conversations.rings[index] = rings;
+    mc.storage.rings[index] = rings;
 
-    server.conversations.ids[index] = conv_id;
-    server.conversations.tokens[index] = token;
+    mc.storage.ids[index] = conv_id;
+    mc.storage.tokens[index] = token;
 
-    server.conversations.start_time[index] = .fromTimespec(start_time);
-    server.conversations.last_update[index] = .zero;
+    mc.storage.start_time[index] = .fromTimespec(start_time);
+    mc.storage.last_update[index] = .zero;
 
-    server.conversations.rx_rttval[index] = 0;
-    server.conversations.rx_srtt[index] = .zero;
-    server.conversations.rx_rto[index] = .zero;
+    mc.storage.rx_rttval[index] = 0;
+    mc.storage.rx_srtt[index] = .zero;
+    mc.storage.rx_rto[index] = .zero;
 
     return @enumFromInt(index);
 }
 
-pub const SegReader = struct {
+pub const Reader = struct {
     ring: *RecvRing,
     /// Current Seg index.
     cur: u32,
@@ -298,7 +298,7 @@ pub const SegReader = struct {
     seek_next: usize,
     interface: Io.Reader,
 
-    pub fn init(ring: *RecvRing) SegReader {
+    pub fn init(ring: *RecvRing) Reader {
         const head = ring.head % RecvRing.size;
 
         return .{
@@ -307,9 +307,9 @@ pub const SegReader = struct {
             .seek_next = 0,
             .interface = .{
                 .vtable = &.{
-                    .stream = SegReader.stream,
-                    .readVec = SegReader.readVec,
-                    .rebase = SegReader.rebase,
+                    .stream = stream,
+                    .readVec = readVec,
+                    .rebase = rebase,
                 },
                 .buffer = &ring.buffers[head],
                 .end = ring.len[head],
@@ -329,13 +329,13 @@ pub const SegReader = struct {
     }
 
     fn rebase(io_r: *Io.Reader, capacity: usize) Io.Reader.RebaseError!void {
-        const segs: *SegReader = @alignCast(@fieldParentPtr("interface", io_r));
+        const r: *Reader = @alignCast(@fieldParentPtr("interface", io_r));
 
-        switch (segs.ring.frg[segs.cur]) {
+        switch (r.ring.frg[r.cur]) {
             .last => return error.EndOfStream,
             _ => {
                 // This means that rebase was called repeatedly. Should not happen.
-                if (segs.seek_next != 0)
+                if (r.seek_next != 0)
                     return error.ReadFailed;
 
                 // Copy the leftover buffered data to the beginning of current buffer.
@@ -346,43 +346,44 @@ pub const SegReader = struct {
                 io_r.end = leftover;
 
                 // Steal some data from the next buffer.
-                const next_seg = (segs.cur + 1) % RecvRing.size;
-                const next_buffer = segs.ring.buffers[next_seg][0..segs.ring.len[next_seg]];
+                const next_seg = (r.cur + 1) % RecvRing.size;
+                const next_buffer = r.ring.buffers[next_seg][0..r.ring.len[next_seg]];
 
                 if (capacity > io_r.end + next_buffer.len)
                     return error.EndOfStream;
 
                 @memcpy(io_r.buffer[leftover..capacity], next_buffer[0 .. capacity - leftover]);
                 io_r.end = capacity;
-                segs.seek_next = capacity - leftover;
+                r.seek_next = capacity - leftover;
             },
         }
     }
 
     fn nextBuffer(io_r: *Io.Reader) Io.Reader.Error!void {
         if (io_r.seek != io_r.end) return;
-        const segs: *SegReader = @alignCast(@fieldParentPtr("interface", io_r));
+        const r: *Reader = @alignCast(@fieldParentPtr("interface", io_r));
 
-        switch (segs.ring.frg[segs.cur]) {
+        switch (r.ring.frg[r.cur]) {
             .last => return error.EndOfStream,
             _ => {
-                segs.cur = (segs.cur + 1) % RecvRing.size;
-                io_r.buffer = &segs.ring.buffers[segs.cur];
-                io_r.end = segs.ring.len[segs.cur];
-                io_r.seek = segs.seek_next;
-                segs.seek_next = 0;
+                r.cur = (r.cur + 1) % RecvRing.size;
+                io_r.buffer = &r.ring.buffers[r.cur];
+                io_r.end = r.ring.len[r.cur];
+                io_r.seek = r.seek_next;
+                r.seek_next = 0;
             },
         }
     }
 };
 
-pub fn reader(s: *Server, client: u32) ?SegReader {
-    _ = s.peekSize(client) orelse return null;
-    return .init(&s.conversations.rings[client].recv);
+pub fn reader(mc: *MultiConversation, index: u32) ?Reader {
+    _ = mc.peekSize(index) orelse return null;
+    return .init(&mc.storage.rings[index].recv);
 }
 
-pub fn toss(s: *Server, client: u32) void {
-    const ring = &s.conversations.rings[client].recv;
+/// Discards one kcp packet.
+pub fn discardAt(mc: *MultiConversation, client: u32) void {
+    const ring = &mc.storage.rings[client].recv;
 
     while (ring.pop()) |index| {
         ring.sn[index] = 0;
@@ -394,8 +395,8 @@ pub fn toss(s: *Server, client: u32) void {
     }
 }
 
-pub fn peekSize(s: *Server, client: u32) ?usize {
-    const ring = &s.conversations.rings[client].recv;
+fn peekSize(mc: *MultiConversation, client: u32) ?usize {
+    const ring = &mc.storage.rings[client].recv;
 
     const ring_head = ring.head;
     defer ring.head = ring_head;
@@ -416,18 +417,18 @@ pub fn peekSize(s: *Server, client: u32) ?usize {
     };
 }
 
-pub const SegWriter = struct {
+pub const Writer = struct {
     ring: *SendRing,
     cur: usize,
     interface: Io.Writer,
 
-    pub fn init(ring: *SendRing, first: u32) SegWriter {
+    pub fn init(ring: *SendRing, first: u32) Writer {
         return .{
             .ring = ring,
             .cur = first,
             .interface = .{
                 .buffer = &ring.buffers[first % SendRing.size],
-                .vtable = &.{ .drain = SegWriter.drain },
+                .vtable = &.{ .drain = drain },
             },
         };
     }
@@ -435,7 +436,7 @@ pub const SegWriter = struct {
     pub fn drain(io_w: *Io.Writer, _: []const []const u8, _: usize) Io.Writer.Error!usize {
         if (io_w.end != io_w.buffer.len) return 0;
 
-        const seg_w: *SegWriter = @alignCast(@fieldParentPtr("interface", io_w));
+        const seg_w: *Writer = @alignCast(@fieldParentPtr("interface", io_w));
         if (seg_w.cur == seg_w.ring.tail - 1) return error.WriteFailed;
 
         seg_w.cur += 1;
@@ -448,15 +449,19 @@ pub const SegWriter = struct {
     }
 };
 
-pub fn allocPushSegments(s: *Server, client: u32, amount: usize) !u32 {
-    const ring = &s.conversations.rings[client].send;
+pub const AllocWriterError = error{
+    MessageOversize,
+};
 
-    var count: usize = (amount + mss - 1) / mss;
+pub fn writer(mc: *MultiConversation, client: u32, size: usize) AllocWriterError!Writer {
+    const ring = &mc.storage.rings[client].send;
+
+    var count: usize = (size + mss - 1) / mss;
 
     if (count >= ring.unused())
         return error.MessageOversize;
 
-    var full_size = amount;
+    var full_size = size;
     const first: u32 = ring.tail;
 
     while (count > 0) : ({
@@ -475,15 +480,15 @@ pub fn allocPushSegments(s: *Server, client: u32, amount: usize) !u32 {
         ring.xmit[index] = 0;
     }
 
-    return first;
+    return .init(ring, first);
 }
 
-pub fn refreshRtt(s: *Server, client: u32, rtt_ms: u32) void {
+fn refreshRtt(mc: *MultiConversation, client: u32, rtt_ms: u32) void {
     var rto: u32 = 0;
 
-    const rx_srtt = &s.conversations.rx_srtt[client];
-    const rx_rttval = &s.conversations.rx_rttval[client];
-    const rx_rto = &s.conversations.rx_rto[client];
+    const rx_srtt = &mc.storage.rx_srtt[client];
+    const rx_rttval = &mc.storage.rx_rttval[client];
+    const rx_rto = &mc.storage.rx_rto[client];
 
     if (rx_srtt.milliseconds == 0) {
         rx_srtt.milliseconds = rtt_ms;
@@ -510,9 +515,9 @@ pub fn refreshRtt(s: *Server, client: u32, rtt_ms: u32) void {
     );
 }
 
-pub fn input(server: *Server, client_index: u32, data: []const u8) !void {
-    const current = server.conversations.last_update[client_index];
-    const rings = server.conversations.rings[client_index];
+pub fn fillAt(mc: *MultiConversation, client_index: u32, data: []const u8) !void {
+    const current = mc.storage.last_update[client_index];
+    const rings = mc.storage.rings[client_index];
 
     var maxack: u32 = 0;
     var latest_ts: kcp.Timeval = .zero;
@@ -529,7 +534,7 @@ pub fn input(server: *Server, client_index: u32, data: []const u8) !void {
         switch (header.cmd) {
             .ack => {
                 if (current.milliseconds >= header.ts.milliseconds)
-                    server.refreshRtt(client_index, current.milliseconds - header.ts.milliseconds);
+                    mc.refreshRtt(client_index, current.milliseconds - header.ts.milliseconds);
 
                 rings.send.ack(header.sn);
 
@@ -571,17 +576,17 @@ pub fn input(server: *Server, client_index: u32, data: []const u8) !void {
 // Returns the amount of bytes drained.
 // This function should be called repeatedly, until it returns zero.
 // Once zero is returned, the caller *must* reset send ring head to the one before drain loop.
-pub fn drain(s: *Server, client: u32, output: *[kcp.mtu]u8) usize {
-    const conv_id = s.conversations.ids[client];
-    const token = s.conversations.tokens[client].downgrade();
+pub fn drainAt(mc: *MultiConversation, client: u32, output: *[kcp.mtu]u8) usize {
+    const conv_id = mc.storage.ids[client];
+    const token = mc.storage.tokens[client].downgrade();
 
-    const current = s.conversations.last_update[client];
-    const rings = s.conversations.rings[client];
+    const current = mc.storage.last_update[client];
+    const rings = mc.storage.rings[client];
 
     const wnd = rings.recv.unused();
     const una = rings.recv.tail;
 
-    var writer: Io.Writer = .fixed(output);
+    var bw: Io.Writer = .fixed(output);
     var ack_header: kcp.Header = .{
         .conv_id = conv_id,
         .token = token,
@@ -595,28 +600,28 @@ pub fn drain(s: *Server, client: u32, output: *[kcp.mtu]u8) usize {
     };
 
     while (rings.ack.pop()) |entry| {
-        if (writer.end + kcp.Header.size > kcp.mtu) {
+        if (bw.end + kcp.Header.size > kcp.mtu) {
             rings.ack.head -= 1;
-            return writer.end;
+            return bw.end;
         }
 
         ack_header.sn = entry.sn;
         ack_header.ts = entry.ts;
-        ack_header.encode(&writer) catch unreachable;
+        ack_header.encode(&bw) catch unreachable;
     }
 
     rings.ack.reset();
 
-    const rx_rto = s.conversations.rx_rto[client];
+    const rx_rto = mc.storage.rx_rto[client];
 
     while (rings.send.pop()) |index| {
         const retransmit = rings.send.xmit[index] != 0;
 
         if (!retransmit or current.milliseconds >= rings.send.resend_ts[index].milliseconds) {
             const len = rings.send.len[index];
-            if (writer.end + len + kcp.Header.size > kcp.mtu) {
+            if (bw.end + len + kcp.Header.size > kcp.mtu) {
                 rings.send.head -= 1; // we'll send it on the next `drain` call.
-                return writer.end;
+                return bw.end;
             }
 
             if (retransmit) {
@@ -642,20 +647,20 @@ pub fn drain(s: *Server, client: u32, output: *[kcp.mtu]u8) usize {
                 .len = rings.send.len[index],
             };
 
-            header.encode(&writer) catch unreachable;
-            writer.writeAll(rings.send.buffers[index][0..header.len]) catch unreachable;
+            header.encode(&bw) catch unreachable;
+            bw.writeAll(rings.send.buffers[index][0..header.len]) catch unreachable;
         }
     }
 
-    return writer.end;
+    return bw.end;
 }
 
-pub fn update(s: *Server, client: u32, current_time: posix.timespec) void {
-    const start = s.conversations.start_time[client];
+pub fn updateAt(mc: *MultiConversation, client: u32, current_time: posix.timespec) void {
+    const start = mc.storage.start_time[client];
     const current: kcp.Timeval = .fromTimespec(current_time);
 
-    s.conversations.last_update[client].milliseconds = current.milliseconds -| start.milliseconds;
-    const ring = &s.conversations.rings[client].send;
+    mc.storage.last_update[client].milliseconds = current.milliseconds -| start.milliseconds;
+    const ring = &mc.storage.rings[client].send;
 
     // Update `ring.head`
     if (ring.pop() != null)
@@ -674,4 +679,4 @@ const kcp = @import("../kcp.zig");
 
 const rmio = @import("rmio");
 const std = @import("std");
-const Server = @This();
+const MultiConversation = @This();

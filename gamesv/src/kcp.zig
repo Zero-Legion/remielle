@@ -1,6 +1,6 @@
 pub const Control = @import("kcp/Control.zig");
 pub const Header = @import("kcp/Header.zig");
-pub const Server = @import("kcp/Server.zig");
+pub const MultiConversation = @import("kcp/MultiConversation.zig");
 
 pub const mtu: usize = 1200;
 pub const mss: usize = mtu - Header.size;

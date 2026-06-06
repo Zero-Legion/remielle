@@ -1,6 +1,6 @@
 const log = std.log.scoped(.@"remielle-gamesv");
 
-kcp_server: kcp.Server,
+multi_conversation: kcp.MultiConversation,
 cvars: ClientVariables,
 output: OutputList,
 conv_counter: kcp.ConvId.Counter,
@@ -19,7 +19,7 @@ pub fn initAlloc(
     csprng: Random,
     max_concurrent_sessions: usize,
 ) Allocator.Error!void {
-    try uninit.kcp_server.initAlloc(arena, max_concurrent_sessions);
+    try uninit.multi_conversation.initAlloc(arena, max_concurrent_sessions);
     try uninit.cvars.initAlloc(arena, max_concurrent_sessions);
     try uninit.output.initAlloc(arena, max_concurrent_sessions);
 
@@ -82,29 +82,24 @@ pub fn onAuthSucceeded(
     key: messaging.Xorpad.Key,
     auth_response: rmpb.main.PlayerGetTokenScRsp,
 ) !void {
-    const client = switch (try server.kcp_server.create(arena, conv_id, token, current_time)) {
+    const client = switch (try server.multi_conversation.create(arena, conv_id, token, current_time)) {
         .none => return error.SessionLimitExceeded, // TODO: evict a client
         _ => |index| index.toInt(),
     };
 
-    errdefer server.kcp_server.release(client);
+    errdefer server.multi_conversation.destroy(client);
 
     // ACK the packet at kcp level
-    server.kcp_server.input(client, first_packet) catch
+    server.multi_conversation.fillAt(client, first_packet) catch
         return error.InvalidFirstPacket;
 
-    _ = server.kcp_server.reader(client) orelse
+    _ = server.multi_conversation.reader(client) orelse
         return error.InvalidFirstPacket;
 
-    server.kcp_server.toss(client);
+    server.multi_conversation.discardAt(client);
 
     const length = messaging.encodingLength(.init, auth_response);
-    const writer_head = try server.kcp_server.allocPushSegments(client, length);
-
-    var writer: kcp.Server.SegWriter = .init(
-        &server.kcp_server.conversations.rings[client].send,
-        writer_head,
-    );
+    var writer = try server.multi_conversation.writer(client, length);
 
     const cmd_id = comptime rmpb.Descriptors.main.message(rmpb.main.PlayerGetTokenScRsp).?.descriptor.cmd_id;
     messaging.encode(&writer.interface, .initial, cmd_id, .init, auth_response) catch unreachable;
@@ -147,17 +142,17 @@ pub fn receiveKcpPacket(
     const client = server.conv_map.get(kcp_header.conv_id) orelse
         return .{ .unauthenticated = .{ .header = kcp_header, .token = token } };
 
-    server.kcp_server.input(client, buffer) catch
-        return error.InputFailed;
+    server.multi_conversation.fillAt(client, buffer) catch
+        return error.FillFailed;
 
     while (true) {
-        var reader = server.kcp_server.reader(client) orelse break;
-        defer server.kcp_server.toss(client);
+        var reader = server.multi_conversation.reader(client) orelse break;
+        defer server.multi_conversation.discardAt(client);
         defer _ = server.per_message_arena.reset(.retain_capacity);
 
         messaging.handlers.process(
             server.per_message_arena.allocator(),
-            &server.kcp_server,
+            &server.multi_conversation,
             &server.cvars,
             time,
             &reader.interface,
@@ -190,7 +185,7 @@ fn release(server: *Server, id: kcp.ConvId) bool {
         // Release the resources associated with this `conv_id`.
         const client = kv.value;
 
-        server.kcp_server.release(client);
+        server.multi_conversation.destroy(client);
         return true;
     } else return false;
 }

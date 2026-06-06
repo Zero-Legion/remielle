@@ -30,7 +30,7 @@ pub const ProcessError = error{
 
 pub fn process(
     arena: Allocator,
-    server: *kcp.Server,
+    multi_conversation: *kcp.MultiConversation,
     cvars: *ClientVariables,
     time: posix.timespec,
     reader: *Io.Reader,
@@ -55,7 +55,7 @@ pub fn process(
     const cmd_id = std.enums.fromInt(CmdId, msg_header.cmd_id) orelse {
         if (head.packet_id == 0) return;
 
-        try sendDummy(server, cvars, client, head.packet_id);
+        try sendDummy(multi_conversation, cvars, client, head.packet_id);
         return;
     };
 
@@ -78,7 +78,7 @@ pub fn process(
 
                 const request: R = .{
                     .body = &body,
-                    .server = server,
+                    .multi_conversation = multi_conversation,
                     .cvars = cvars,
                     .time = time,
                     .client = client,
@@ -105,7 +105,7 @@ pub fn Request(comptime message_name: @EnumLiteral()) type {
         pub const cmd_id = rmpb.cmdId(Body);
 
         body: *const Body,
-        server: *kcp.Server,
+        multi_conversation: *kcp.MultiConversation,
         cvars: *ClientVariables,
         time: posix.timespec,
         client: u32,
@@ -117,12 +117,12 @@ pub fn Request(comptime message_name: @EnumLiteral()) type {
             rsp: @field(rmpb.main, @tagName(response_name)),
         ) SendMessageError!void {
             const id = comptime rmpb.cmdId(@TypeOf(rsp)) orelse {
-                try sendDummy(r.server, r.cvars, r.client, r.packet_id);
+                try sendDummy(r.multi_conversation, r.cvars, r.client, r.packet_id);
                 return;
             };
 
             defer r.cvars.packet_id_counters[r.client] += 1;
-            try sendMessage(r.server, &r.cvars.xorpads[r.client], r.client, .{
+            try sendMessage(r.multi_conversation, &r.cvars.xorpads[r.client], r.client, .{
                 .packet_id = r.cvars.packet_id_counters[r.client],
                 .ack_packet_id = r.packet_id,
             }, id, rsp);
@@ -136,7 +136,7 @@ pub fn Request(comptime message_name: @EnumLiteral()) type {
             const id = comptime rmpb.cmdId(@TypeOf(ntf)) orelse return;
 
             defer r.cvars.packet_id_counters[r.client] += 1;
-            try sendMessage(r.server, &r.cvars.xorpads[r.client], r.client, .{
+            try sendMessage(r.multi_conversation, &r.cvars.xorpads[r.client], r.client, .{
                 .packet_id = r.cvars.packet_id_counters[r.client],
             }, id, ntf);
         }
@@ -144,7 +144,7 @@ pub fn Request(comptime message_name: @EnumLiteral()) type {
 }
 
 fn sendMessage(
-    server: *kcp.Server,
+    multi_conversation: *kcp.MultiConversation,
     xorpad: *const messaging.Xorpad,
     client: u32,
     head: rmpb.stable.PacketHead,
@@ -153,10 +153,7 @@ fn sendMessage(
 ) SendMessageError!void {
     const length = messaging.encodingLength(head, message);
 
-    var writer: kcp.Server.SegWriter = .init(
-        &server.conversations.rings[client].send,
-        try server.allocPushSegments(client, length),
-    );
+    var writer = try multi_conversation.writer(client, length);
 
     messaging.encode(
         &writer.interface,
@@ -167,7 +164,7 @@ fn sendMessage(
     ) catch unreachable;
 }
 
-fn sendDummy(server: *kcp.Server, cvars: *ClientVariables, client: u32, packet_id: u32) !void {
+fn sendDummy(multi_conversation: *kcp.MultiConversation, cvars: *ClientVariables, client: u32, packet_id: u32) !void {
     const DummyCmd = comptime DummyCmd: {
         const ns = rmpb.Descriptors.main.namespace();
         const name = @import("config").dummy_cmd;
@@ -180,7 +177,7 @@ fn sendDummy(server: *kcp.Server, cvars: *ClientVariables, client: u32, packet_i
     const dummy: DummyCmd = .{};
     defer cvars.packet_id_counters[client] += 1;
 
-    try sendMessage(server, &cvars.xorpads[client], client, .{
+    try sendMessage(multi_conversation, &cvars.xorpads[client], client, .{
         .packet_id = cvars.packet_id_counters[client],
         .ack_packet_id = packet_id,
     }, DummyCmd.cmd_id, dummy);
