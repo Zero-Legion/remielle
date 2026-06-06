@@ -135,10 +135,10 @@ pub fn bind(gpa: Allocator, csprng: Random, bind_address: *const posix.Sockaddr)
         switch (status) {
             .success => {},
             .unauthenticated => |input| {
-                var string_buffer: [1024]u8 = undefined;
+                var request_string_buffer: [1024]u8 = undefined;
 
                 const request = messaging.expectFirstPacket(
-                    &string_buffer,
+                    &request_string_buffer,
                     buffer[kcp.Header.size..][0..input.header.len],
                 ) catch |err| switch (err) {
                     error.SizeMismatch,
@@ -148,22 +148,17 @@ pub fn bind(gpa: Allocator, csprng: Random, bind_address: *const posix.Sockaddr)
                     => continue,
                 };
 
-                const client_rand_key = decryptClientRandKey(request.client_rand_key) orelse {
-                    log.debug("failed to decrypt client_rand_key from '{f}'", .{name});
-                    continue;
-                };
+                var response_string_buffer: [messaging.auth.string_buffer_size]u8 = undefined;
 
-                const server_rand_key = csprng.int(u64);
-                var encrypted_rand_key: [block_size_base64]u8 = undefined;
-                var sign: [block_size_base64]u8 = undefined;
-
-                encryptAndSignServerRandKey(server_rand_key, &encrypted_rand_key, &sign);
-
-                const uid: u32 = 666; // TODO
-                const rsp: rmpb.main.PlayerGetTokenScRsp = .{
-                    .uid = uid,
-                    .server_rand_key = &encrypted_rand_key,
-                    .sign = &sign,
+                const player_token = messaging.auth.playerGetToken(
+                    csprng,
+                    &request,
+                    &response_string_buffer,
+                ) catch |err| switch (err) {
+                    error.RandKeyDecryptFail => |e| {
+                        log.err("failed to authenticate client from {f}: {t}", .{ name, e });
+                        continue;
+                    },
                 };
 
                 server.onAuthSucceeded(
@@ -173,8 +168,8 @@ pub fn bind(gpa: Allocator, csprng: Random, bind_address: *const posix.Sockaddr)
                     input.header.conv_id,
                     input.token,
                     current_time,
-                    .init(client_rand_key, server_rand_key),
-                    rsp,
+                    player_token.key,
+                    player_token.response,
                 ) catch |err| switch (err) {
                     error.MessageOversize,
                     error.OutOfMemory,
@@ -232,42 +227,6 @@ fn drainOutgoingPackets(
     }
 }
 
-const block_size_base64 = std.base64.standard.Encoder.calcSize(rmcrypt.rsa.block_size);
-
-fn decryptClientRandKey(b64: []const u8) ?u64 {
-    if (b64.len != block_size_base64)
-        return null;
-
-    var ciphertext: [rmcrypt.rsa.block_size]u8 = undefined;
-
-    std.base64.standard.Decoder.decode(&ciphertext, b64) catch
-        return null;
-
-    var plaintext_buf: [rmcrypt.rsa.block_size]u8 = undefined;
-    const plaintext = rmcrypt.rsa.server_private_key.decrypt(&ciphertext, &plaintext_buf) orelse
-        return null;
-
-    if (plaintext.len != @sizeOf(u64))
-        return null;
-
-    return std.mem.readInt(u64, plaintext[0..@sizeOf(u64)], .little);
-}
-
-fn encryptAndSignServerRandKey(
-    server_rand_key: u64,
-    out_ciphertext: *[block_size_base64]u8,
-    out_sign: *[block_size_base64]u8,
-) void {
-    var ciphertext: [rmcrypt.rsa.block_size]u8 = undefined;
-    var sign: [rmcrypt.rsa.block_size]u8 = undefined;
-
-    rmcrypt.rsa.client_public_key.encrypt(std.mem.asBytes(&server_rand_key), &ciphertext);
-    rmcrypt.rsa.server_private_key.sign(std.mem.asBytes(&server_rand_key), &sign);
-
-    _ = std.base64.standard.Encoder.encode(out_ciphertext, &ciphertext);
-    _ = std.base64.standard.Encoder.encode(out_sign, &sign);
-}
-
 fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
     log.err(fmt, args);
     std.process.exit(1);
@@ -283,7 +242,5 @@ const kcp = @import("kcp.zig");
 const Server = @import("Server.zig");
 const messaging = @import("messaging.zig");
 
-const rmcrypt = @import("rmcrypt");
-const rmpb = @import("rmpb");
 const rmio = @import("rmio");
 const std = @import("std");
