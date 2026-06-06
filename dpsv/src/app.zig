@@ -3,7 +3,13 @@ const log = std.log.scoped(.@"hollowell-dpsv");
 const accept_backlog: u31 = 100;
 const buffer_size: usize = 8192;
 
-pub fn listen(arena: Allocator, n_slots: usize, data: *const Data, address: *const posix.Sockaddr) u8 {
+pub fn listen(
+    cancelation: *const nrmio.Cancelation,
+    arena: Allocator,
+    n_slots: usize,
+    data: *const Data,
+    address: *const posix.Sockaddr,
+) void {
     var storage = Slot.Storage.initAlloc(arena, n_slots) catch
         fatal("failed to allocate {d} slots", .{n_slots});
 
@@ -19,13 +25,10 @@ pub fn listen(arena: Allocator, n_slots: usize, data: *const Data, address: *con
     posix.setsockopt(listen_fd, .SOCKET, .REUSEADDR, 1);
 
     posix.bind(listen_fd, address) catch |err| switch (err) {
-        error.AddressInUse => {
-            log.err(
-                "the address {f} is already in use; another instance of this server might be already running",
-                .{address},
-            );
-            return 1;
-        },
+        error.AddressInUse => fatal(
+            "the address {f} is already in use; another instance of this server might be already running",
+            .{address},
+        ),
         else => |e| fatal("bind: {t}", .{e}),
     };
 
@@ -38,8 +41,15 @@ pub fn listen(arena: Allocator, n_slots: usize, data: *const Data, address: *con
         .revents = 0,
     };
 
-    while (true) {
-        var n_events = posix.poll(storage.pollfds, -1) catch |err| fatal("poll: {t}", .{err});
+    while (!cancelation.cancelRequested()) {
+        var n_events = posix.poll(storage.pollfds, -1) catch |err| switch (err) {
+            error.Interrupted => continue, // Could be the cancelation.
+            else => |e| {
+                log.err("poll failed: {t}", .{e});
+                continue;
+            },
+        };
+
         var pollfd_i: usize = 0;
 
         while (n_events != 0 and pollfd_i != storage.pollfds.len) : (pollfd_i += 1) {
@@ -63,7 +73,7 @@ pub fn listen(arena: Allocator, n_slots: usize, data: *const Data, address: *con
         }
     }
 
-    return 0;
+    log.info("shutting down...", .{});
 }
 
 /// Accepts all outstanding connection requests in OS queue

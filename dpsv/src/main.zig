@@ -9,6 +9,8 @@ pub const std_options: std.Options = .{
     .logFn = nrmio.log.logFn,
 };
 
+var cancelation: nrmio.Cancelation = .init;
+
 pub fn main(init: Init.Minimal) u8 {
     var debug_allocator: heap.DebugAllocator(.{}) = .init;
     defer if (is_debug) {
@@ -41,7 +43,18 @@ pub fn main(init: Init.Minimal) u8 {
         error.OutOfMemory => fatal("failed to build static responses", .{}),
     };
 
-    return app.listen(arena.allocator(), options.slots, &data, &listen_address);
+    posix.sigaction(.INT, &.{
+        .handler = .{ .handler = sigintHandler },
+        .mask = std.mem.zeroes(@FieldType(posix.Sigaction, "mask")),
+        .flags = 0,
+    }, null);
+
+    app.listen(&cancelation, arena.allocator(), options.slots, &data, &listen_address);
+    return 0;
+}
+
+fn sigintHandler(_: posix.SIG) callconv(.c) void {
+    cancelation.cancel();
 }
 
 inline fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
