@@ -133,15 +133,7 @@ pub fn bind(gpa: Allocator, csprng: Random, bind_address: *const posix.Sockaddr)
         };
 
         switch (status) {
-            .success => while (server.output.pop()) |index| drainOutgoingPackets(
-                server_fd,
-                current_time,
-                &server.multi_conversation,
-                index,
-                &name,
-            ) catch |err| switch (err) {
-                else => {},
-            },
+            .success => {},
             .unauthenticated => |input| {
                 var string_buffer: [1024]u8 = undefined;
 
@@ -190,18 +182,18 @@ pub fn bind(gpa: Allocator, csprng: Random, bind_address: *const posix.Sockaddr)
                     error.InvalidFirstPacket,
                     => continue,
                 };
-
-                while (server.output.pop()) |index| drainOutgoingPackets(
-                    server_fd,
-                    current_time,
-                    &server.multi_conversation,
-                    index,
-                    &name,
-                ) catch |err| switch (err) {
-                    else => {},
-                };
             },
         }
+
+        while (server.output.pop()) |index| drainOutgoingPackets(
+            server_fd,
+            current_time,
+            &server.multi_conversation,
+            index,
+            &name,
+        ) catch |err| switch (err) {
+            else => {},
+        };
     }
 
     return 0;
