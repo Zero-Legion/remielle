@@ -28,8 +28,8 @@ pub fn writev(file: fd_t, iovecs: []const iovec_const) WriteVError!usize {
         var iosb: sys.IO_STATUS_BLOCK = undefined;
         var i: usize = 0;
 
-        while (i < iovecs.len) : (i += 1) {
-            switch (sys.NtWriteFile(
+        iov_loop: while (i < iovecs.len) : (i += 1) {
+            const maybe_err: ?WriteVError = NtWriteFile: switch (sys.NtWriteFile(
                 file,
                 null, // Event
                 null, // ApcRoutine
@@ -46,15 +46,27 @@ pub fn writev(file: fd_t, iovecs: []const iovec_const) WriteVError!usize {
                     if (iosb.Information < iovecs[i].len)
                         // Short write encountered; it's better to break out of this loop now
                         // to avoid unnecessary blocking. Let the caller decide what to do.
-                        break;
+                        break :iov_loop;
+
+                    break :NtWriteFile null;
                 },
-                .NO_MEMORY, .QUOTA_EXCEEDED, .WORKING_SET_QUOTA => return error.SystemResources,
-                .PIPE_BROKEN => return error.BrokenPipe,
-                .ACCESS_DENIED => return error.PermissionDenied,
-                .DISK_FULL => return error.NoSpaceLeft,
-                .FILE_LOCK_CONFLICT => return error.LockViolation,
+                .NO_MEMORY, .QUOTA_EXCEEDED, .WORKING_SET_QUOTA => error.SystemResources,
+                .PIPE_BROKEN => error.BrokenPipe,
+                .ACCESS_DENIED => error.PermissionDenied,
+                .DISK_FULL => error.NoSpaceLeft,
+                .FILE_LOCK_CONFLICT => error.LockViolation,
                 else => |e| unexpectedErrno(e),
-            }
+            };
+
+            if (maybe_err) |err| return switch (n_write) {
+                // The first write failed, return the error.
+                0 => err,
+                // Some calls have succeeded, return the number of bytes written first
+                // allowing the caller to advance its index into the buffer.
+                // Since this most likely will be called repeatedly,
+                // the caller will be able to handle it on the next call.
+                else => n_write,
+            };
         }
 
         return n_write;
