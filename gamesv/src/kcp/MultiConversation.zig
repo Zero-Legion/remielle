@@ -572,11 +572,23 @@ pub fn fillAt(mc: *MultiConversation, client_index: u32, data: []const u8) !void
         rings.send.markFastack(maxack, latest_ts);
 }
 
+pub const DrainIterator = union(enum) {
+    init: void,
+    index: usize,
+    ended: void,
+
+    pub fn isAtEnd(it: *const DrainIterator) bool {
+        return switch (it.*) {
+            .ended => true,
+            .init, .index => false,
+        };
+    }
+};
+
 // Drains outgoing segment queue into user-provided `output` buffer.
 // Returns the amount of bytes drained.
-// This function should be called repeatedly, until it returns zero.
-// Once zero is returned, the caller *must* reset send ring head to the one before drain loop.
-pub fn drainAt(mc: *MultiConversation, client: u32, output: *[kcp.mtu]u8) usize {
+// This function should be called repeatedly, while `DrainIterator` is not at end.
+pub fn drainAt(mc: *MultiConversation, client: u32, it: *DrainIterator, output: *[kcp.mtu]u8) usize {
     const conv_id = mc.storage.ids[client];
     const token = mc.storage.tokens[client].downgrade();
 
@@ -614,13 +626,32 @@ pub fn drainAt(mc: *MultiConversation, client: u32, output: *[kcp.mtu]u8) usize 
 
     const rx_rto = mc.storage.rx_rto[client];
 
-    while (rings.send.pop()) |index| {
+    const it_index = switch (it.*) {
+        .init => init: {
+            it.* = .{ .index = rings.send.head };
+            break :init &it.index;
+        },
+        .index => |*index| index,
+        .ended => return bw.end,
+    };
+
+    while (true) {
+        const index = next: while (it_index.* != rings.send.tail) {
+            defer it_index.* += 1;
+
+            if (rings.send.sn[it_index.* % SendRing.size] == it_index.*)
+                break :next it_index.* % SendRing.size;
+        } else {
+            it.* = .ended;
+            return bw.end;
+        };
+
         const retransmit = rings.send.xmit[index] != 0;
 
         if (!retransmit or current.milliseconds >= rings.send.resend_ts[index].milliseconds) {
             const len = rings.send.len[index];
             if (bw.end + len + kcp.Header.size > kcp.mtu) {
-                rings.send.head -= 1; // we'll send it on the next `drain` call.
+                it_index.* -= 1; // we'll send it on the next `drain` call.
                 return bw.end;
             }
 

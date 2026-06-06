@@ -216,14 +216,12 @@ fn drainOutgoingPackets(
 ) !void {
     multi_conversation.updateAt(client, current_time);
 
-    const send_ring = &multi_conversation.storage.rings[client].send;
-    const ring_head = send_ring.head;
-    defer send_ring.head = ring_head;
-
     var output: [kcp.mtu]u8 = undefined;
-    while (true) {
-        const n_send = multi_conversation.drainAt(client, &output);
-        if (n_send == 0) break;
+    var it: kcp.MultiConversation.DrainIterator = .init;
+
+    while (!it.isAtEnd()) {
+        const n_send = multi_conversation.drainAt(client, &it, &output);
+        if (n_send == 0) continue;
 
         const header: posix.msghdr_const = .{
             .name = destination.raw(),
