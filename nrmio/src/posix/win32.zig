@@ -91,6 +91,15 @@ pub const iovec_const = extern struct {
 pub const IO_STATUS_BLOCK = windows.IO_STATUS_BLOCK;
 
 pub const NtWriteFile = windows.ntdll.NtWriteFile;
+pub const NtOpenThread = windows.ntdll.NtOpenThread;
+
+pub const PAPCFUNC = *const fn (ULONG_PTR) callconv(.winapi) void;
+
+pub extern "kernel32" fn QueueUserAPC(
+    PAPCFUNC,
+    HANDLE,
+    ULONG_PTR,
+) callconv(.winapi) DWORD;
 
 pub extern "kernel32" fn SetConsoleCtrlHandler(
     *const fn (dwCtrlType: DWORD) callconv(.winapi) BOOL,
@@ -938,6 +947,8 @@ const WORD = windows.WORD;
 const DWORD = windows.DWORD;
 const ULONG = windows.ULONG;
 const USHORT = windows.USHORT;
+const ULONG_PTR = windows.ULONG_PTR;
+const HANDLE = windows.HANDLE;
 
 pub const WSADATA = if (@sizeOf(usize) == @sizeOf(u64))
     extern struct {

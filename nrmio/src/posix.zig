@@ -101,6 +101,7 @@ pub const Sigaction = switch (native_os) {
 pub const SIG = switch (native_os) {
     .windows => enum(u8) {
         INT = 2,
+        IO = 22,
     },
     else => sys.SIG,
 };
@@ -133,6 +134,39 @@ pub fn sigaction(sig: SIG, act: ?*const Sigaction, oldact: ?*Sigaction) void {
     switch (sys.errno(sys.sigaction(sig, act, oldact))) {
         .SUCCESS => {},
         else => |e| unexpectedErrno(e),
+    }
+}
+
+pub const thread_t = std.Thread.Handle;
+
+pub fn thread_self() thread_t {
+    return switch (native_os) {
+        .linux => sys.gettid(),
+        .windows => NtOpenThread: {
+            var handle: std.os.windows.HANDLE = undefined;
+            std.debug.assert(sys.NtOpenThread(
+                &handle,
+                std.os.windows.ACCESS_MASK.Specific.Thread.ALL_ACCESS,
+                &.{ .ObjectName = null },
+                &std.os.windows.teb().ClientId,
+            ) == .SUCCESS);
+
+            break :NtOpenThread handle;
+        },
+        else => sys.pthread_self(),
+    };
+}
+
+fn dummyApc(_: usize) callconv(.winapi) void {}
+
+pub fn thread_kill(thread: thread_t, sig: SIG) void {
+    switch (native_os) {
+        .linux => _ = sys.tgkill(sys.getpid(), thread, .IO),
+        .windows => switch (sig) {
+            .IO => std.debug.assert(sys.QueueUserAPC(dummyApc, thread, 0) != 0),
+            else => unreachable, // thread_kill only supports SIGIO on windows.
+        },
+        else => _ = sys.pthread_kill(thread, sig),
     }
 }
 
