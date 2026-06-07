@@ -13,6 +13,19 @@ pub const clockid_t = enum(u32) {
     MONOTONIC = 1,
 };
 
+pub const SIG = enum(u8) {
+    INT = 2,
+    IO = 22,
+};
+
+pub const Sigaction = extern struct {
+    handler: extern union {
+        handler: *const fn (SIG) callconv(.c) void,
+    },
+    mask: [1]u8, // ignored
+    flags: u8, // ignored
+};
+
 pub const pollfd = extern struct {
     fd: fd_t,
     events: u16,
@@ -93,19 +106,6 @@ pub const IO_STATUS_BLOCK = windows.IO_STATUS_BLOCK;
 pub const NtWriteFile = windows.ntdll.NtWriteFile;
 pub const NtOpenThread = windows.ntdll.NtOpenThread;
 
-pub const PAPCFUNC = *const fn (ULONG_PTR) callconv(.winapi) void;
-
-pub extern "kernel32" fn QueueUserAPC(
-    PAPCFUNC,
-    HANDLE,
-    ULONG_PTR,
-) callconv(.winapi) DWORD;
-
-pub extern "kernel32" fn SetConsoleCtrlHandler(
-    *const fn (dwCtrlType: DWORD) callconv(.winapi) BOOL,
-    BOOL,
-) callconv(.winapi) BOOL;
-
 pub extern "advapi32" fn SystemFunction036(output: [*]u8, length: ULONG) callconv(.winapi) BOOL;
 pub const RtlGenRandom = SystemFunction036;
 
@@ -150,7 +150,57 @@ pub extern "ws2_32" fn setsockopt(
     optlen: u32,
 ) callconv(.winapi) i32;
 
-pub extern "ws2_32" fn WSAPoll(fdArray: [*]pollfd, fds: u32, timeout: i32) callconv(.winapi) i32;
+const PAPCFUNC = *const fn (ULONG_PTR) callconv(.winapi) void;
+
+extern "kernel32" fn QueueUserAPC(
+    PAPCFUNC,
+    HANDLE,
+    ULONG_PTR,
+) callconv(.winapi) DWORD;
+
+extern "kernel32" fn SetConsoleCtrlHandler(
+    *const fn (dwCtrlType: DWORD) callconv(.winapi) BOOL,
+    BOOL,
+) callconv(.winapi) BOOL;
+
+const sighandler = struct {
+    var console_ctrl_handler_set: bool = false;
+    var array: std.EnumArray(
+        SIG,
+        *const fn (SIG) callconv(.c) void,
+    ) = .initFill(defaultSignalHandler);
+
+    fn consoleCtrlHandler(_: std.os.windows.DWORD) callconv(.winapi) std.os.windows.BOOL {
+        array.get(.INT)(.INT);
+        return .TRUE;
+    }
+
+    fn defaultSignalHandler(_: SIG) callconv(.c) void {
+        // stub.
+    }
+};
+
+pub fn sigaction(sig: SIG, act: ?*const Sigaction, oldact: ?*Sigaction) void {
+    _ = oldact;
+
+    if (act) |new_act|
+        sighandler.array.set(sig, new_act.handler.handler);
+
+    if (!sighandler.console_ctrl_handler_set) {
+        sighandler.console_ctrl_handler_set = true;
+        _ = SetConsoleCtrlHandler(sighandler.consoleCtrlHandler, .TRUE);
+    }
+}
+
+pub fn pthread_kill(thread: std.Thread.Handle, sig: SIG) void {
+    // Execute the signal handler as APC.
+    // This will also interrupt alertable waits, which is somewhat equivalent to EINTR.
+    std.debug.assert(QueueUserAPC(
+        @ptrCast(sighandler.array.get(sig)),
+        thread,
+        @intFromEnum(sig),
+    ) != 0);
+}
 
 const AFD_POLL = struct {
     const READ: windows.ULONG = 0x0001;
@@ -295,23 +345,21 @@ pub fn poll(fds: [*]pollfd, nfds: u32, timeout: i32) PollError!u31 {
         poll_info,
         @sizeOf(AFD_POLL.INFO) + nfds * @sizeOf(AFD_POLL.HANDLE_INFO),
     )) {
-        .SUCCESS => unreachable,
-        .PENDING => {},
-        else => return error.AfdIoctlFailed,
-    }
-
-    switch (ntdll.NtWaitForSingleObject(
-        thread_afd_handle,
-        .TRUE, // Alertable
-        null, // Timeout
-    )) {
         .SUCCESS => {},
-        .TIMEOUT => unreachable,
-        .ALERTED, .USER_APC => {
-            _ = ntdll.NtCancelIoFile(thread_afd_handle, &iosb);
-            return error.Interrupted;
+        .PENDING => switch (ntdll.NtWaitForSingleObject(
+            thread_afd_handle,
+            .TRUE, // Alertable
+            null, // Timeout
+        )) {
+            .SUCCESS => {},
+            .TIMEOUT => unreachable,
+            .ALERTED, .USER_APC => {
+                _ = ntdll.NtCancelIoFile(thread_afd_handle, &iosb);
+                return error.Interrupted;
+            },
+            else => unreachable,
         },
-        else => unreachable,
+        else => return error.AfdIoctlFailed,
     }
 
     switch (iosb.u.Status) {
@@ -320,40 +368,35 @@ pub fn poll(fds: [*]pollfd, nfds: u32, timeout: i32) PollError!u31 {
         else => return error.SystemResources,
     }
 
+    // https://gitlab.winehq.org/wine/wine/-/blob/e6180321fe7c6a766ce27603c52761bea0a98739/dlls/ws2_32/socket.c#L3190-3216
     var ret_count: u31 = 0;
     var infos_i: usize = 0;
+    while (infos_i < poll_info.NumberOfHandles) : (infos_i += 1) {
+        for (fds[0..nfds]) |*fd| if (fd.fd == poll_handle_infos[infos_i].Handle) {
+            const poll_handle_info = poll_handle_infos[infos_i];
+            var revents: u16 = 0;
 
-    // Wine does O(n^2) here
-    // https://gitlab.winehq.org/wine/wine/-/blob/e6180321fe7c6a766ce27603c52761bea0a98739/dlls/ws2_32/socket.c#L3190-3216
-    for (fds[0..nfds]) |*fd| {
-        if (fd.fd == windows.INVALID_HANDLE_VALUE)
-            continue;
+            if ((poll_handle_info.Events & (AFD_POLL.ACCEPT | AFD_POLL.READ)) != 0)
+                revents |= POLL.RDNORM;
 
-        const poll_handle_info = poll_handle_infos[infos_i];
-        infos_i += 1;
+            if ((poll_handle_info.Events & AFD_POLL.OOB) != 0)
+                revents |= POLL.RDBAND;
 
-        var revents: u16 = 0;
+            if ((poll_handle_info.Events & AFD_POLL.WRITE) != 0)
+                revents |= POLL.WRNORM;
 
-        if ((poll_handle_info.Events & (AFD_POLL.ACCEPT | AFD_POLL.READ)) != 0)
-            revents |= POLL.RDNORM;
+            if ((poll_handle_info.Events & (AFD_POLL.RESET | AFD_POLL.HUP)) != 0)
+                revents |= POLL.HUP;
 
-        if ((poll_handle_info.Events & AFD_POLL.OOB) != 0)
-            revents |= POLL.RDBAND;
+            if ((poll_handle_info.Events & (AFD_POLL.RESET | AFD_POLL.CONNECT_ERR)) != 0)
+                revents |= POLL.ERR;
 
-        if ((poll_handle_info.Events & AFD_POLL.WRITE) != 0)
-            revents |= POLL.WRNORM;
+            if ((poll_handle_info.Events & AFD_POLL.CLOSE) != 0)
+                revents |= POLL.NVAL;
 
-        if ((poll_handle_info.Events & (AFD_POLL.RESET | AFD_POLL.HUP)) != 0)
-            revents |= POLL.HUP;
-
-        if ((poll_handle_info.Events & (AFD_POLL.RESET | AFD_POLL.CONNECT_ERR)) != 0)
-            revents |= POLL.ERR;
-
-        if ((poll_handle_info.Events & AFD_POLL.CLOSE) != 0)
-            revents |= POLL.NVAL;
-
-        fd.revents = revents;
-        if (revents != 0) ret_count += 1;
+            fd.revents = revents;
+            if (revents != 0) ret_count += 1;
+        };
     }
 
     return ret_count;

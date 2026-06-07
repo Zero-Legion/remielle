@@ -87,54 +87,16 @@ pub fn writev(file: fd_t, iovecs: []const iovec_const) WriteVError!usize {
     };
 }
 
-pub const Sigaction = switch (native_os) {
-    .windows => struct {
-        handler: extern union {
-            handler: *const fn (SIG) callconv(.c) void,
-        },
-        mask: [1]u8, // ignored
-        flags: u8, // ignored
-    },
-    else => sys.Sigaction,
-};
-
-pub const SIG = switch (native_os) {
-    .windows => enum(u8) {
-        INT = 2,
-        IO = 22,
-    },
-    else => sys.SIG,
-};
+pub const SIG = sys.SIG;
+pub const Sigaction = sys.Sigaction;
 
 pub fn sigaction(sig: SIG, act: ?*const Sigaction, oldact: ?*Sigaction) void {
-    if (native_os == .windows) {
-        const inner = struct {
-            var console_ctrl_handler_set: bool = false;
-            var handlers: std.EnumMap(SIG, *const fn (SIG) callconv(.c) void) = .init(.{});
+    const rc = sys.sigaction(sig, act, oldact);
 
-            fn consoleCtrlHandler(_: std.os.windows.DWORD) callconv(.winapi) std.os.windows.BOOL {
-                if (handlers.get(.INT)) |handler|
-                    handler(.INT);
-
-                return .TRUE;
-            }
-        };
-
-        if (act) |new_act|
-            inner.handlers.put(sig, new_act.handler.handler);
-
-        if (!inner.console_ctrl_handler_set) {
-            inner.console_ctrl_handler_set = true;
-            _ = sys.SetConsoleCtrlHandler(inner.consoleCtrlHandler, .TRUE);
-        }
-
-        return;
-    }
-
-    switch (sys.errno(sys.sigaction(sig, act, oldact))) {
+    if (!is_windows) switch (sys.errno(rc)) {
         .SUCCESS => {},
         else => |e| unexpectedErrno(e),
-    }
+    };
 }
 
 pub const thread_t = std.Thread.Handle;
@@ -157,15 +119,9 @@ pub fn thread_self() thread_t {
     };
 }
 
-fn dummyApc(_: usize) callconv(.winapi) void {}
-
 pub fn thread_kill(thread: thread_t, sig: SIG) void {
     switch (native_os) {
         .linux => _ = sys.tgkill(sys.getpid(), thread, .IO),
-        .windows => switch (sig) {
-            .IO => std.debug.assert(sys.QueueUserAPC(dummyApc, thread, 0) != 0),
-            else => unreachable, // thread_kill only supports SIGIO on windows.
-        },
         else => _ = sys.pthread_kill(thread, sig),
     }
 }
