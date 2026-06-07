@@ -10,6 +10,12 @@ pub const std_options: std.Options = .{
     .logFn = nrmio.log.logFn,
 };
 
+var cancelation: nrmio.Cancelation = .init;
+
+// Populated by `main`
+var main_thread_id: Thread.Id = undefined;
+var main_thread: posix.thread_t = undefined;
+
 pub fn main(init: Init.Minimal) u8 {
     var debug_allocator: heap.DebugAllocator(.{}) = .init;
     defer if (is_debug) {
@@ -52,7 +58,25 @@ pub fn main(init: Init.Minimal) u8 {
     var csprng_impl: DefaultCsprng = .init(csprng_seed);
     const csprng = csprng_impl.random();
 
-    return app.bind(gpa, csprng, &bind_address, options.concurrent_sessions);
+    main_thread_id = Thread.getCurrentId();
+    main_thread = posix.thread_self();
+
+    posix.sigaction(.INT, &.{
+        .handler = .{ .handler = sigintHandler },
+        .mask = std.mem.zeroes(@FieldType(posix.Sigaction, "mask")),
+        .flags = 0,
+    }, null);
+
+    app.bind(&cancelation, gpa, csprng, &bind_address, options.concurrent_sessions);
+    return 0;
+}
+
+fn sigintHandler(_: posix.SIG) callconv(.c) void {
+    cancelation.cancel();
+
+    // Will only happen on windows
+    if (Thread.getCurrentId() != main_thread_id)
+        posix.thread_kill(main_thread, .IO);
 }
 
 inline fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
@@ -62,6 +86,7 @@ inline fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
 
 const is_debug = builtin.mode == .Debug;
 
+const Thread = std.Thread;
 const Init = std.process.Init;
 const DefaultCsprng = std.Random.DefaultCsprng;
 

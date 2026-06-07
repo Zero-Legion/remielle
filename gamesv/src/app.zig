@@ -1,11 +1,12 @@
 const log = std.log.scoped(.@"hollowell-gamesv");
 
 pub fn bind(
+    cancelation: *const Cancelation,
     gpa: Allocator,
     csprng: Random,
     bind_address: *const posix.Sockaddr,
     concurrent_sessions: u32,
-) u8 {
+) void {
     const server_fd = posix.socket(.INET, .init(.DGRAM, .flags(.{
         .CLOEXEC = true,
         .NONBLOCK = true,
@@ -42,7 +43,7 @@ pub fn bind(
 
     var buffer: [kcp.mtu]u8 = undefined;
 
-    recvmsg: while (true) {
+    recvmsg: while (!cancelation.cancelRequested()) {
         var iov: [1]posix.iovec = .{.{
             .base = &buffer,
             .len = @intCast(buffer.len),
@@ -65,10 +66,10 @@ pub fn bind(
             // this should not happen for well-behaved clients.
             error.MessageOversize => continue :recvmsg,
 
-            error.WouldBlock => poll: while (true) {
+            error.WouldBlock => poll: while (!cancelation.cancelRequested()) {
                 // Poll until it becomes readable.
                 _ = posix.poll((&server_pollfd)[0..1], -1) catch |poll_err| switch (poll_err) {
-                    error.Interrupted => continue :poll, // TODO: integrate with graceful shutdown
+                    error.Interrupted => continue :poll,
                     else => |e| {
                         log.err("poll: {t}", .{e});
                         continue :poll;
@@ -77,6 +78,9 @@ pub fn bind(
 
                 if ((server_pollfd.revents & posix.POLL.IN) != 0)
                     continue :recvmsg;
+            } else {
+                // Canceled.
+                break :recvmsg;
             },
 
             else => |e| {
@@ -98,7 +102,10 @@ pub fn bind(
             );
 
             if (out_buf) |*send_buf|
-                sendMessage(server_fd, &name, send_buf) catch {};
+                sendMessage(cancelation, server_fd, &name, send_buf) catch |err| switch (err) {
+                    error.Interrupted => break :recvmsg, // The cancelation was requested.
+                    else => {},
+                };
 
             continue;
         } else if (n_recv < kcp.Header.size) continue;
@@ -107,7 +114,7 @@ pub fn bind(
             current_time,
             &name,
             buffer[0..n_recv],
-        ) catch |err| switch (err) {
+        ) catch |recv_err| switch (recv_err) {
             error.InvalidToken => {
                 // This may happen if server has been restarted, but the game
                 // had an active session.
@@ -115,7 +122,10 @@ pub fn bind(
                 var ctl: [kcp.Control.size]u8 = undefined;
 
                 kcp.Control.encode(&ctl, .disconnect, kcp_header.conv_id, kcp_header.token, 404);
-                sendMessage(server_fd, &name, &ctl) catch {};
+                sendMessage(cancelation, server_fd, &name, &ctl) catch |send_err| switch (send_err) {
+                    error.Interrupted => break :recvmsg, // The cancelation was requested.
+                    else => {},
+                };
 
                 continue;
             },
@@ -171,44 +181,53 @@ pub fn bind(
         }
 
         while (server.output.pop()) |index| drainOutgoingPackets(
+            cancelation,
             server_fd,
             current_time,
             &server.multi_conversation,
             index,
             &name,
         ) catch |err| switch (err) {
+            error.Interrupted => break :recvmsg, // The cancelation was requested.
             else => {},
         };
     }
 
-    return 0;
+    log.info("shutting down...", .{});
 }
 
+/// Sends all of the pending packets for the session at `index`
+/// Returns `error.Interrupted` if cancelation was requested.
 fn drainOutgoingPackets(
+    cancelation: *const Cancelation,
     server_fd: posix.socket_t,
     current_time: posix.timespec,
     multi_conversation: *kcp.MultiConversation,
-    client: u32,
+    index: u32,
     destination: *const posix.Sockaddr,
 ) !void {
-    multi_conversation.updateAt(client, current_time);
+    multi_conversation.updateAt(index, current_time);
 
     var output_buf: [kcp.mtu]u8 = undefined;
     var it: kcp.MultiConversation.DrainIterator = .init;
 
     while (!it.isAtEnd()) {
-        const n_send = multi_conversation.drainAt(client, &it, &output_buf);
+        const n_send = multi_conversation.drainAt(index, &it, &output_buf);
         if (n_send == 0) continue;
 
-        try sendMessage(server_fd, destination, output_buf[0..n_send]);
+        try sendMessage(cancelation, server_fd, destination, output_buf[0..n_send]);
     }
 }
 
+/// Sends the message.
+/// Returns `error.Interrupted` if cancelation was requested.
+/// Blocks in case the OS send buffer is full (subject to cancelation)
 fn sendMessage(
+    cancelation: *const Cancelation,
     server_fd: posix.socket_t,
     to: *const posix.Sockaddr,
     data: []const u8,
-) posix.SendmsgError!void {
+) (posix.SendmsgError || error{Interrupted})!void {
     const header: posix.msghdr_const = .{
         .name = to.raw(),
         .namelen = to.len(),
@@ -236,9 +255,9 @@ fn sendMessage(
                 .revents = 0,
             };
 
-            poll: while (true) {
+            poll: while (!cancelation.cancelRequested()) {
                 _ = posix.poll((&pollfd)[0..1], -1) catch |poll_err| switch (poll_err) {
-                    error.Interrupted => continue :poll, // TODO: integrate with graceful shutdown
+                    error.Interrupted => continue :poll,
                     else => |e| {
                         log.err("poll: {t}", .{e});
                         continue :poll;
@@ -247,6 +266,9 @@ fn sendMessage(
 
                 if ((pollfd.revents & posix.POLL.OUT) != 0)
                     continue :sendmsg;
+            } else {
+                // Canceled.
+                return error.Interrupted;
             }
         },
         else => |e| return e,
@@ -260,6 +282,7 @@ fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
 
 const Random = std.Random;
 const Allocator = std.mem.Allocator;
+const Cancelation = nrmio.Cancelation;
 
 const posix = nrmio.posix;
 const heap = std.heap;
