@@ -7,13 +7,10 @@ pub fn bind(gpa: Allocator, csprng: Random, bind_address: *const posix.Sockaddr)
     defer posix.close(server_fd);
 
     posix.bind(server_fd, bind_address) catch |err| switch (err) {
-        error.AddressInUse => {
-            log.err(
-                "the address {f} is already in use; another instance of this server might be already running",
-                .{bind_address},
-            );
-            return 1;
-        },
+        error.AddressInUse => fatal(
+            "the address {f} is already in use; another instance of this server might be already running",
+            .{bind_address},
+        ),
         else => |e| fatal("bind: {t}", .{e}),
     };
 
@@ -73,25 +70,8 @@ pub fn bind(gpa: Allocator, csprng: Random, bind_address: *const posix.Sockaddr)
                 &out_buf,
             );
 
-            if (out_buf) |*send_buf| {
-                const ctl_header: posix.msghdr_const = .{
-                    .name = header.name,
-                    .namelen = header.namelen,
-                    .iov = &.{.{
-                        .base = send_buf,
-                        .len = @intCast(kcp.Control.size),
-                    }},
-                    .iovlen = 1,
-                    .control = null,
-                    .controllen = 0,
-                    .flags = 0,
-                };
-
-                _ = posix.sendmsg(server_fd, &ctl_header, 0) catch |err| switch (err) {
-                    error.MessageOversize => unreachable,
-                    else => continue,
-                };
-            }
+            if (out_buf) |*send_buf|
+                sendMessage(server_fd, &name, send_buf) catch {};
 
             continue;
         } else if (n_recv < kcp.Header.size) continue;
@@ -104,28 +84,11 @@ pub fn bind(gpa: Allocator, csprng: Random, bind_address: *const posix.Sockaddr)
             error.InvalidToken => {
                 // This may happen if server has been restarted, but the game
                 // had an active session.
-
                 const kcp_header = kcp.Header.decode(buffer[0..kcp.Header.size]) catch unreachable;
                 var ctl: [kcp.Control.size]u8 = undefined;
+
                 kcp.Control.encode(&ctl, .disconnect, kcp_header.conv_id, kcp_header.token, 404);
-
-                const ctl_header: posix.msghdr_const = .{
-                    .name = header.name,
-                    .namelen = header.namelen,
-                    .iov = &.{.{
-                        .base = &ctl,
-                        .len = @intCast(kcp.Control.size),
-                    }},
-                    .iovlen = 1,
-                    .control = null,
-                    .controllen = 0,
-                    .flags = 0,
-                };
-
-                _ = posix.sendmsg(server_fd, &ctl_header, 0) catch |send_err| switch (send_err) {
-                    error.MessageOversize => unreachable,
-                    else => continue,
-                };
+                sendMessage(server_fd, &name, &ctl) catch {};
 
                 continue;
             },
@@ -203,28 +166,36 @@ fn drainOutgoingPackets(
 ) !void {
     multi_conversation.updateAt(client, current_time);
 
-    var output: [kcp.mtu]u8 = undefined;
+    var output_buf: [kcp.mtu]u8 = undefined;
     var it: kcp.MultiConversation.DrainIterator = .init;
 
     while (!it.isAtEnd()) {
-        const n_send = multi_conversation.drainAt(client, &it, &output);
+        const n_send = multi_conversation.drainAt(client, &it, &output_buf);
         if (n_send == 0) continue;
 
-        const header: posix.msghdr_const = .{
-            .name = destination.raw(),
-            .namelen = destination.len(),
-            .iov = &.{.{
-                .base = &output,
-                .len = @intCast(n_send),
-            }},
-            .iovlen = 1,
-            .control = null,
-            .controllen = 0,
-            .flags = 0,
-        };
-
-        _ = try posix.sendmsg(server_fd, &header, 0);
+        try sendMessage(server_fd, destination, output_buf[0..n_send]);
     }
+}
+
+fn sendMessage(
+    server_fd: posix.socket_t,
+    to: *const posix.Sockaddr,
+    data: []const u8,
+) posix.SendmsgError!void {
+    const header: posix.msghdr_const = .{
+        .name = to.raw(),
+        .namelen = to.len(),
+        .iov = &.{.{
+            .base = data.ptr,
+            .len = @intCast(data.len),
+        }},
+        .iovlen = 1,
+        .control = null,
+        .controllen = 0,
+        .flags = 0,
+    };
+
+    _ = try posix.sendmsg(server_fd, &header, 0);
 }
 
 fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
