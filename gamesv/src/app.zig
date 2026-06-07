@@ -30,26 +30,15 @@ pub fn bind(gpa: Allocator, csprng: Random, bind_address: *const posix.Sockaddr)
     server.initAlloc(server_arena.allocator(), &per_message_arena, csprng, slots) catch
         fatal("failed to allocate server instance for {d} sessions slots", .{slots});
 
-    var pollfds: [1]posix.pollfd = .{.{
+    var server_pollfd: posix.pollfd = .{
         .fd = server_fd,
         .events = posix.POLL.IN,
         .revents = 0,
-    }};
+    };
 
     var buffer: [kcp.mtu]u8 = undefined;
 
-    while (true) {
-        _ = posix.poll(&pollfds, -1) catch |err| switch (err) {
-            error.Interrupted => continue,
-            else => |e| {
-                log.err("poll: {t}", .{e});
-                continue;
-            },
-        };
-
-        if ((pollfds[0].revents & posix.POLL.IN) == 0)
-            continue;
-
+    recvmsg: while (true) {
         var iov: [1]posix.iovec = .{.{
             .base = &buffer,
             .len = @intCast(buffer.len),
@@ -67,17 +56,28 @@ pub fn bind(gpa: Allocator, csprng: Random, bind_address: *const posix.Sockaddr)
             .flags = 0,
         };
 
-        const n_recv = posix.recvmsg(server_fd, &header, 0) catch |err| switch (err) {
+        const n_recv = posix.recvmsg(server_fd, &header, 0) catch |recvmsg_err| switch (recvmsg_err) {
             // The size of packet was greater than `mtu`,
             // this should not happen for well-behaved clients.
-            error.MessageOversize => continue,
+            error.MessageOversize => continue :recvmsg,
 
-            // Spurious readiness
-            error.WouldBlock => continue,
+            error.WouldBlock => poll: while (true) {
+                // Poll until it becomes readable.
+                _ = posix.poll((&server_pollfd)[0..1], -1) catch |poll_err| switch (poll_err) {
+                    error.Interrupted => continue :poll, // TODO: integrate with graceful shutdown
+                    else => |e| {
+                        log.err("poll: {t}", .{e});
+                        continue :poll;
+                    },
+                };
+
+                if ((server_pollfd.revents & posix.POLL.IN) != 0)
+                    continue :recvmsg;
+            },
 
             else => |e| {
                 log.err("UDP packet receive failed: {t}", .{e});
-                continue;
+                continue :recvmsg;
             },
         };
 
@@ -226,14 +226,14 @@ fn sendMessage(
             // In case of connectionless sockets, OS buffer will be drained quickly
             // so there's no need to worry about blocking behavior here.
 
-            var pollfds: [1]posix.pollfd = .{.{
+            var pollfd: posix.pollfd = .{
                 .fd = server_fd,
                 .events = posix.POLL.OUT,
                 .revents = 0,
-            }};
+            };
 
             poll: while (true) {
-                _ = posix.poll(&pollfds, -1) catch |poll_err| switch (poll_err) {
+                _ = posix.poll((&pollfd)[0..1], -1) catch |poll_err| switch (poll_err) {
                     error.Interrupted => continue :poll, // TODO: integrate with graceful shutdown
                     else => |e| {
                         log.err("poll: {t}", .{e});
@@ -241,7 +241,7 @@ fn sendMessage(
                     },
                 };
 
-                if ((pollfds[0].revents & posix.POLL.OUT) != 0)
+                if ((pollfd.revents & posix.POLL.OUT) != 0)
                     continue :sendmsg;
             }
         },
