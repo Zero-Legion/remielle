@@ -2,6 +2,7 @@ const log = std.log.scoped(.@"hollowell-gamesv");
 
 pub const Options = struct {
     bind_address: []const u8 = @import("config").bind_address,
+    concurrent_sessions: u32 = @import("config").concurrent_sessions,
     insecure_random_allowed: bool = false,
 };
 
@@ -51,7 +52,7 @@ pub fn main(init: Init.Minimal) u8 {
     var csprng_impl: DefaultCsprng = .init(csprng_seed);
     const csprng = csprng_impl.random();
 
-    return app.bind(gpa, csprng, &bind_address);
+    return app.bind(gpa, csprng, &bind_address, options.concurrent_sessions);
 }
 
 inline fn fatal(comptime fmt: []const u8, args: anytype) noreturn {

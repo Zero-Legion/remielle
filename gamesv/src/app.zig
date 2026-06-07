@@ -1,6 +1,11 @@
 const log = std.log.scoped(.@"hollowell-gamesv");
 
-pub fn bind(gpa: Allocator, csprng: Random, bind_address: *const posix.Sockaddr) u8 {
+pub fn bind(
+    gpa: Allocator,
+    csprng: Random,
+    bind_address: *const posix.Sockaddr,
+    concurrent_sessions: u32,
+) u8 {
     const server_fd = posix.socket(.INET, .init(.DGRAM, .flags(.{
         .CLOEXEC = true,
         .NONBLOCK = true,
@@ -25,10 +30,9 @@ pub fn bind(gpa: Allocator, csprng: Random, bind_address: *const posix.Sockaddr)
     var per_message_arena: heap.ArenaAllocator = .init(gpa);
     defer per_message_arena.deinit();
 
-    const slots: usize = 16; // TODO: make it an option
     var server: Server = undefined;
-    server.initAlloc(server_arena.allocator(), &per_message_arena, csprng, slots) catch
-        fatal("failed to allocate server instance for {d} sessions slots", .{slots});
+    server.initAlloc(server_arena.allocator(), &per_message_arena, csprng, concurrent_sessions) catch
+        fatal("failed to allocate server instance for {d} sessions slots", .{concurrent_sessions});
 
     var server_pollfd: posix.pollfd = .{
         .fd = server_fd,

@@ -1,7 +1,11 @@
 .{
     // UDP bind address.
-    // Can be overridded by the `-b` option.
+    // Can be overridden by the `-b` option.
     .bind_address = "127.0.0.1:20501",
+
+    // The amount of allowed concurrent sessions.
+    // Can be overridden by the `-c` option.
+    .concurrent_sessions = 64,
 
     .dummy_cmd = "CJEBHOFBOGJ",
 }
