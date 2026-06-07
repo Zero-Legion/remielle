@@ -1,7 +1,10 @@
 const log = std.log.scoped(.@"hollowell-gamesv");
 
 pub fn bind(gpa: Allocator, csprng: Random, bind_address: *const posix.Sockaddr) u8 {
-    const server_fd = posix.socket(.INET, .init(.DGRAM, .flags(.{ .CLOEXEC = true })), .UDP) catch |err|
+    const server_fd = posix.socket(.INET, .init(.DGRAM, .flags(.{
+        .CLOEXEC = true,
+        .NONBLOCK = true,
+    })), .UDP) catch |err|
         fatal("socket: {t}", .{err});
 
     defer posix.close(server_fd);
@@ -27,8 +30,25 @@ pub fn bind(gpa: Allocator, csprng: Random, bind_address: *const posix.Sockaddr)
     server.initAlloc(server_arena.allocator(), &per_message_arena, csprng, slots) catch
         fatal("failed to allocate server instance for {d} sessions slots", .{slots});
 
+    var pollfds: [1]posix.pollfd = .{.{
+        .fd = server_fd,
+        .events = posix.POLL.IN,
+        .revents = 0,
+    }};
+
+    var buffer: [kcp.mtu]u8 = undefined;
+
     while (true) {
-        var buffer: [kcp.mtu]u8 = undefined;
+        _ = posix.poll(&pollfds, -1) catch |err| switch (err) {
+            error.Interrupted => continue,
+            else => |e| {
+                log.err("poll: {t}", .{e});
+                continue;
+            },
+        };
+
+        if ((pollfds[0].revents & posix.POLL.IN) == 0)
+            continue;
 
         var iov: [1]posix.iovec = .{.{
             .base = &buffer,
@@ -51,6 +71,9 @@ pub fn bind(gpa: Allocator, csprng: Random, bind_address: *const posix.Sockaddr)
             // The size of packet was greater than `mtu`,
             // this should not happen for well-behaved clients.
             error.MessageOversize => continue,
+
+            // Spurious readiness
+            error.WouldBlock => continue,
 
             else => |e| {
                 log.err("UDP packet receive failed: {t}", .{e});
@@ -195,7 +218,35 @@ fn sendMessage(
         .flags = 0,
     };
 
-    _ = try posix.sendmsg(server_fd, &header, 0);
+    sendmsg: while (true) if (posix.sendmsg(server_fd, &header, 0)) |_| {
+        break :sendmsg;
+    } else |sendmsg_err| switch (sendmsg_err) {
+        error.WouldBlock => {
+            // Poll until it becomes writable.
+            // In case of connectionless sockets, OS buffer will be drained quickly
+            // so there's no need to worry about blocking behavior here.
+
+            var pollfds: [1]posix.pollfd = .{.{
+                .fd = server_fd,
+                .events = posix.POLL.OUT,
+                .revents = 0,
+            }};
+
+            poll: while (true) {
+                _ = posix.poll(&pollfds, -1) catch |poll_err| switch (poll_err) {
+                    error.Interrupted => continue :poll, // TODO: integrate with graceful shutdown
+                    else => |e| {
+                        log.err("poll: {t}", .{e});
+                        continue :poll;
+                    },
+                };
+
+                if ((pollfds[0].revents & posix.POLL.OUT) != 0)
+                    continue :sendmsg;
+            }
+        },
+        else => |e| return e,
+    };
 }
 
 fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
