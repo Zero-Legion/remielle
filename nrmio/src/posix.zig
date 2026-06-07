@@ -416,10 +416,10 @@ pub fn poll(pollfds: []pollfd, timeout: i32) PollError!usize {
         .INTR => error.Interrupted,
         .NOMEM => error.SystemResources,
         else => |e| unexpectedErrno(e),
-    } else if (rc == sys.SOCKET_ERROR) switch (sys.WSAGetLastError()) {
-        .WSAENOBUFS => error.SystemResources,
+    } else if (rc) |n| return n else |err| switch (err) {
+        error.Interrupted, error.SystemResources => |e| return e,
         else => |e| unexpectedErrno(e),
-    } else @intCast(rc);
+    };
 }
 
 pub const AcceptError = error{

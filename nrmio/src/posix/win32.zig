@@ -143,7 +143,212 @@ pub extern "ws2_32" fn setsockopt(
 
 pub extern "ws2_32" fn WSAPoll(fdArray: [*]pollfd, fds: u32, timeout: i32) callconv(.winapi) i32;
 
-pub const poll = WSAPoll;
+const AFD_POLL = struct {
+    const READ: windows.ULONG = 0x0001;
+    const OOB: windows.ULONG = 0x0002;
+    const WRITE: windows.ULONG = 0x0004;
+    const HUP: windows.ULONG = 0x0008;
+    const RESET: windows.ULONG = 0x0010;
+    const CLOSE: windows.ULONG = 0x0020;
+    const CONNECT: windows.ULONG = 0x0040;
+    const ACCEPT: windows.ULONG = 0x0080;
+    const CONNECT_ERR: windows.ULONG = 0x0100;
+
+    // Trailing: [*]HANDLE_INFO
+    const INFO = extern struct {
+        Timeout: windows.LARGE_INTEGER,
+        NumberOfHandles: windows.ULONG,
+        Exclusive: windows.ULONG,
+    };
+
+    const HANDLE_INFO = extern struct {
+        Handle: windows.HANDLE,
+        Events: windows.ULONG,
+        Status: windows.NTSTATUS,
+    };
+};
+
+threadlocal var thread_afd_handle = windows.INVALID_HANDLE_VALUE;
+threadlocal var thread_poll_info: [*]u8 = undefined;
+threadlocal var thread_poll_info_len: usize = 0;
+
+pub const PollError = error{
+    AfdCreationFailed,
+    AfdIoctlFailed,
+    SystemResources,
+    Interrupted,
+};
+
+pub fn poll(fds: [*]pollfd, nfds: u32, timeout: i32) PollError!u31 {
+    if (thread_afd_handle == windows.INVALID_HANDLE_VALUE) {
+        var iosb: windows.IO_STATUS_BLOCK = undefined;
+        switch (ntdll.NtCreateFile(
+            &thread_afd_handle,
+            .{
+                .GENERIC = .{ .WRITE = true, .READ = true },
+                .STANDARD = .{ .SYNCHRONIZE = true },
+            },
+            &.{
+                .ObjectName = @constCast(&windows.UNICODE_STRING.init(
+                    &.{ '\\', 'D', 'e', 'v', 'i', 'c', 'e', '\\', 'A', 'f', 'd', '\\', 'H', 'o', 'l', 'l', 'o', 'w' },
+                )),
+            },
+            &iosb,
+            null, // AllocationSize
+            .{}, // FileAttributes
+            .{ .READ = true, .WRITE = true },
+            .OPEN_IF,
+            .{ .IO = .ASYNCHRONOUS },
+            null, // EaBuffer
+            0, // EaLength
+        )) {
+            .SUCCESS => {},
+            else => return error.AfdCreationFailed,
+        }
+    }
+
+    if (@divFloor(thread_poll_info_len -| @sizeOf(AFD_POLL.INFO), @sizeOf(AFD_POLL.HANDLE_INFO)) < nfds) {
+        // TODO: heap.PageAllocator also offers realloc
+
+        if (thread_poll_info_len != 0)
+            heap.PageAllocator.unmap(@alignCast(thread_poll_info[0..thread_poll_info_len]));
+
+        const allocation_len = std.mem.alignForward(
+            usize,
+            @sizeOf(AFD_POLL.INFO) + nfds * @sizeOf(AFD_POLL.HANDLE_INFO),
+            heap.pageSize(),
+        );
+
+        const pages = heap.PageAllocator.map(allocation_len, .of(AFD_POLL.INFO)) orelse
+            return error.SystemResources;
+
+        thread_poll_info = pages;
+        thread_poll_info_len = allocation_len;
+    }
+
+    const poll_info: *AFD_POLL.INFO = @ptrCast(@alignCast(thread_poll_info));
+
+    poll_info.Timeout = if (timeout >= 0)
+        -@as(i64, timeout) * 10_000
+    else
+        -0x7FFFFFFFFFFFFFFF;
+
+    poll_info.NumberOfHandles = 0;
+    poll_info.Exclusive = 0;
+
+    const poll_handle_infos: [*]AFD_POLL.HANDLE_INFO = @ptrCast(@alignCast(
+        thread_poll_info[@sizeOf(AFD_POLL.INFO)..],
+    ));
+
+    for (fds[0..nfds]) |*fd| {
+        if (fd.fd == windows.INVALID_HANDLE_VALUE) {
+            fd.revents = POLL.NVAL;
+            continue;
+        }
+
+        poll_handle_infos[poll_info.NumberOfHandles] = .{
+            .Handle = fd.fd,
+            .Status = .SUCCESS,
+            .Events = Events: {
+                // https://gitlab.winehq.org/wine/wine/-/blob/e6180321fe7c6a766ce27603c52761bea0a98739/dlls/ws2_32/socket.c#L3158-3164
+
+                var ev: windows.ULONG = AFD_POLL.HUP |
+                    AFD_POLL.RESET |
+                    AFD_POLL.CONNECT_ERR;
+
+                if ((fd.events & POLL.RDNORM) != 0)
+                    ev |= AFD_POLL.ACCEPT | AFD_POLL.READ;
+
+                if ((fd.events & POLL.RDBAND) != 0)
+                    ev |= AFD_POLL.OOB;
+
+                if ((fd.events & POLL.WRNORM) != 0)
+                    ev |= AFD_POLL.WRITE;
+
+                break :Events ev;
+            },
+        };
+
+        poll_info.NumberOfHandles += 1;
+    }
+
+    // https://gitlab.winehq.org/wine/wine/-/blob/e6180321fe7c6a766ce27603c52761bea0a98739/dlls/ws2_32/socket.c#L3113
+    var iosb: windows.IO_STATUS_BLOCK = undefined;
+    switch (ntdll.NtDeviceIoControlFile(
+        thread_afd_handle,
+        null, // Event
+        null, // ApcRoutine
+        null, // ApcContext
+        &iosb,
+        windows.IOCTL.AFD.POLL,
+        poll_info,
+        @sizeOf(AFD_POLL.INFO) + nfds * @sizeOf(AFD_POLL.HANDLE_INFO),
+        poll_info,
+        @sizeOf(AFD_POLL.INFO) + nfds * @sizeOf(AFD_POLL.HANDLE_INFO),
+    )) {
+        .SUCCESS => unreachable,
+        .PENDING => {},
+        else => return error.AfdIoctlFailed,
+    }
+
+    switch (ntdll.NtWaitForSingleObject(
+        thread_afd_handle,
+        .TRUE, // Alertable
+        null, // Timeout
+    )) {
+        .SUCCESS => {},
+        .TIMEOUT => unreachable,
+        .ALERTED, .USER_APC => {
+            _ = ntdll.NtCancelIoFile(thread_afd_handle, &iosb);
+            return error.Interrupted;
+        },
+        else => unreachable,
+    }
+
+    switch (iosb.u.Status) {
+        .SUCCESS => {},
+        .TIMEOUT => return 0,
+        else => return error.SystemResources,
+    }
+
+    var ret_count: u31 = 0;
+    var infos_i: usize = 0;
+
+    // Wine does O(n^2) here
+    // https://gitlab.winehq.org/wine/wine/-/blob/e6180321fe7c6a766ce27603c52761bea0a98739/dlls/ws2_32/socket.c#L3190-3216
+    for (fds[0..nfds]) |*fd| {
+        if (fd.fd == windows.INVALID_HANDLE_VALUE)
+            continue;
+
+        const poll_handle_info = poll_handle_infos[infos_i];
+        infos_i += 1;
+
+        var revents: u16 = 0;
+
+        if ((poll_handle_info.Events & (AFD_POLL.ACCEPT | AFD_POLL.READ)) != 0)
+            revents |= POLL.RDNORM;
+
+        if ((poll_handle_info.Events & AFD_POLL.OOB) != 0)
+            revents |= POLL.RDBAND;
+
+        if ((poll_handle_info.Events & AFD_POLL.WRITE) != 0)
+            revents |= POLL.WRNORM;
+
+        if ((poll_handle_info.Events & (AFD_POLL.RESET | AFD_POLL.HUP)) != 0)
+            revents |= POLL.HUP;
+
+        if ((poll_handle_info.Events & (AFD_POLL.RESET | AFD_POLL.CONNECT_ERR)) != 0)
+            revents |= POLL.ERR;
+
+        if ((poll_handle_info.Events & AFD_POLL.CLOSE) != 0)
+            revents |= POLL.NVAL;
+
+        fd.revents = revents;
+        if (revents != 0) ret_count += 1;
+    }
+
+    return ret_count;
+}
 
 pub const FIONBIO = -2147195266;
 pub const SOCKET_ERROR = -1;
@@ -755,6 +960,8 @@ else
         lpVendorInfo: *u8,
     };
 
+const heap = std.heap;
+const ntdll = windows.ntdll;
 const windows = std.os.windows;
 const assert = std.debug.assert;
 
