@@ -1,4 +1,4 @@
-const log = std.log.scoped(.@"hollowell-gamesv");
+const log = std.log.scoped(.@"remielle-gamesv");
 
 pub const Options = struct {
     bind_address: []const u8 = @import("config").bind_address,
@@ -7,10 +7,10 @@ pub const Options = struct {
 };
 
 pub const std_options: std.Options = .{
-    .logFn = nrmio.log.logFn,
+    .logFn = rmio.log.logFn,
 };
 
-var cancelation: nrmio.Cancelation = .init;
+var cancelation: rmio.Cancelation = .init;
 
 // Populated by `main`
 var main_thread_id: Thread.Id = undefined;
@@ -33,10 +33,10 @@ pub fn main(init: Init.Minimal) u8 {
     const args = init.args.toSlice(arena.allocator()) catch |err|
         fatal("failed to collect cli arguments: {t}", .{err});
 
-    var options_err: nrmcli.opt.ErrorDescription = undefined;
-    const options = nrmcli.opt.parse(Options, args[1..], &options_err) orelse fatal(
+    var options_err: rmcli.opt.ErrorDescription = undefined;
+    const options = rmcli.opt.parse(Options, args[1..], &options_err) orelse fatal(
         "{f}\nusage: {s} {f}",
-        .{ options_err, args[0], nrmcli.opt.Usage(Options) },
+        .{ options_err, args[0], rmcli.opt.Usage(Options) },
     );
 
     const bind_address = posix.Sockaddr.parseIp4(options.bind_address) catch |err| {
@@ -90,7 +90,7 @@ const Thread = std.Thread;
 const Init = std.process.Init;
 const DefaultCsprng = std.Random.DefaultCsprng;
 
-const posix = nrmio.posix;
+const posix = rmio.posix;
 const heap = std.heap;
 const net = std.Io.net;
 const exit = std.process.exit;
@@ -98,6 +98,6 @@ const exit = std.process.exit;
 const app = @import("app.zig");
 
 const std = @import("std");
-const nrmio = @import("nrmio");
-const nrmcli = @import("nrmcli");
+const rmio = @import("rmio");
+const rmcli = @import("rmcli");
 const builtin = @import("builtin");

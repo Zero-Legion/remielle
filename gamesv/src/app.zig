@@ -1,4 +1,4 @@
-const log = std.log.scoped(.@"hollowell-gamesv");
+const log = std.log.scoped(.@"remielle-gamesv");
 
 pub fn bind(
     cancelation: *const Cancelation,
@@ -218,13 +218,13 @@ fn notifyPlayerKick(
     server_fd: posix.socket_t,
     current_time: posix.timespec,
     index: u32,
-    reason: nrmpb.main.PlayerKickReason,
+    reason: rmpb.main.PlayerKickReason,
 ) !void {
-    const cmd_id = ((comptime nrmpb.Descriptors.main.message(
-        nrmpb.main.PlayerKickScNotify,
+    const cmd_id = ((comptime rmpb.Descriptors.main.message(
+        rmpb.main.PlayerKickScNotify,
     )) orelse return).descriptor.cmd_id;
 
-    const notify: nrmpb.main.PlayerKickScNotify = .{ .reason = reason };
+    const notify: rmpb.main.PlayerKickScNotify = .{ .reason = reason };
 
     try messaging.sendMessage(
         &server.multi_conversation,
@@ -347,15 +347,15 @@ fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
 
 const Random = std.Random;
 const Allocator = std.mem.Allocator;
-const Cancelation = nrmio.Cancelation;
+const Cancelation = rmio.Cancelation;
 
-const posix = nrmio.posix;
+const posix = rmio.posix;
 const heap = std.heap;
 
 const kcp = @import("kcp.zig");
 const Server = @import("Server.zig");
 const messaging = @import("messaging.zig");
 
-const nrmpb = @import("nrmpb");
-const nrmio = @import("nrmio");
+const rmpb = @import("rmpb");
+const rmio = @import("rmio");
 const std = @import("std");

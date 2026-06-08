@@ -38,7 +38,7 @@ pub fn wrapReader(xp: *const Xorpad, reader: *Io.Reader, limit: usize) Reader {
 }
 
 pub fn fillSeeded(xp: *Xorpad, key: Key) void {
-    var mt: nrmcrypt.prng.MT19937 = .init(@intFromEnum(key));
+    var mt: rmcrypt.prng.MT19937 = .init(@intFromEnum(key));
     for (0..size >> 3) |i|
         std.mem.writeInt(u64, xp.bytes[i * 8 ..][0..8], mt.get(), .big);
 }
@@ -184,7 +184,7 @@ pub const Reader = struct {
 };
 
 const Io = std.Io;
-const nrmcrypt = @import("nrmcrypt");
+const rmcrypt = @import("rmcrypt");
 
 const std = @import("std");
 const Xorpad = @This();

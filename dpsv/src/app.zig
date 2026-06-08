@@ -1,10 +1,10 @@
-const log = std.log.scoped(.@"hollowell-dpsv");
+const log = std.log.scoped(.@"remielle-dpsv");
 
 const accept_backlog: u31 = 100;
 const buffer_size: usize = 8192;
 
 pub fn listen(
-    cancelation: *const nrmio.Cancelation,
+    cancelation: *const rmio.Cancelation,
     arena: Allocator,
     n_slots: usize,
     data: *const Data,
@@ -314,7 +314,7 @@ fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
     std.process.exit(1);
 }
 
-const posix = nrmio.posix;
+const posix = rmio.posix;
 const Allocator = std.mem.Allocator;
 
 const debug = std.debug;
@@ -323,5 +323,5 @@ const Data = @import("Data.zig");
 const http = @import("http.zig");
 const routes = @import("routes.zig");
 
-const nrmio = @import("nrmio");
+const rmio = @import("rmio");
 const std = @import("std");

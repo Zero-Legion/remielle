@@ -1,4 +1,4 @@
-const log = std.log.scoped(.@"hollowell-dpsv::routes");
+const log = std.log.scoped(.@"remielle-dpsv::routes");
 
 pub const Result = struct {
     status_line: []const u8,
@@ -86,10 +86,10 @@ pub fn process(data: *const Data, request: *const http.RequestLine) Result {
 }
 
 const fmt = std.fmt;
-const posix = nrmio.posix;
+const posix = rmio.posix;
 
 const http = @import("http.zig");
 const Data = @import("Data.zig");
-const nrmio = @import("nrmio");
+const rmio = @import("rmio");
 
 const std = @import("std");

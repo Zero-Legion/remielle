@@ -66,6 +66,6 @@ const unlock_ids: []const i32 = &.{
 
 const handlers = @import("../handlers.zig");
 
-const posix = @import("nrmio").posix;
-const pb = @import("nrmpb").main;
+const posix = @import("rmio").posix;
+const pb = @import("rmpb").main;
 const std = @import("std");

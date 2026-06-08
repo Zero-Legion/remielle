@@ -41,5 +41,5 @@ const SkillType = enum(u32) {
 
 const handlers = @import("../handlers.zig");
 
-const pb = @import("nrmpb").main;
+const pb = @import("rmpb").main;
 const std = @import("std");

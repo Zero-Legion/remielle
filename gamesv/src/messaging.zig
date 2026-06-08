@@ -1,4 +1,4 @@
-const log = std.log.scoped(.@"hollowell-gamesv::messaging");
+const log = std.log.scoped(.@"remielle-gamesv::messaging");
 
 pub const auth = @import("messaging/auth.zig");
 pub const handlers = @import("messaging/handlers.zig");
@@ -28,30 +28,30 @@ pub const Header = struct {
     }
 };
 
-pub fn encodingLength(head: nrmpb.stable.PacketHead, body: anytype) usize {
-    return nrmpb.encodingLength(.stable, head) + nrmpb.encodingLength(.main, body) + 16;
+pub fn encodingLength(head: rmpb.stable.PacketHead, body: anytype) usize {
+    return rmpb.encodingLength(.stable, head) + rmpb.encodingLength(.main, body) + 16;
 }
 
-pub fn decodePacketHead(bytes: []const u8) ?nrmpb.stable.PacketHead {
+pub fn decodePacketHead(bytes: []const u8) ?rmpb.stable.PacketHead {
     var reader: Io.Reader = .fixed(bytes);
-    return nrmpb.decode(.stable, nrmpb.stable.PacketHead, .failing, &reader) catch null;
+    return rmpb.decode(.stable, rmpb.stable.PacketHead, .failing, &reader) catch null;
 }
 
 pub fn encode(
     writer: *Io.Writer,
     xorpad: *const Xorpad,
     cmd_id: u16,
-    head: nrmpb.stable.PacketHead,
+    head: rmpb.stable.PacketHead,
     body: anytype,
 ) Io.Writer.Error!void {
     try writer.writeAll(&Header.magic);
     try writer.writeInt(u16, cmd_id, .big);
-    try writer.writeInt(u16, @intCast(nrmpb.encodingLength(.stable, head)), .big);
-    try writer.writeInt(u32, @intCast(nrmpb.encodingLength(.main, body)), .big);
-    try nrmpb.encode(.stable, writer, head);
+    try writer.writeInt(u16, @intCast(rmpb.encodingLength(.stable, head)), .big);
+    try writer.writeInt(u32, @intCast(rmpb.encodingLength(.main, body)), .big);
+    try rmpb.encode(.stable, writer, head);
 
     var xw = xorpad.wrapWriter(writer);
-    try nrmpb.encode(.main, &xw.interface, body);
+    try rmpb.encode(.main, &xw.interface, body);
     xw.deinit();
 
     try writer.writeInt(u32, 0x89ABCDEF, .big);
@@ -64,7 +64,7 @@ pub fn expectFirstPacket(
     string_buffer: []u8,
     /// Packet contents, *not* including kcp header
     data: []u8,
-) !nrmpb.main.PlayerGetTokenCsReq {
+) !rmpb.main.PlayerGetTokenCsReq {
     if (data.len < Header.size)
         return error.SizeMismatch;
 
@@ -72,7 +72,7 @@ pub fn expectFirstPacket(
     if (header.head_len + header.body_len > data.len - Header.size)
         return error.SizeMismatch;
 
-    if (header.cmd_id != nrmpb.main_desc.PlayerGetTokenCsReq.cmd_id) {
+    if (header.cmd_id != rmpb.main_desc.PlayerGetTokenCsReq.cmd_id) {
         log.debug("received unexpected first cmd_id: {d}", .{header.cmd_id});
         return error.UnexpectedCmdId;
     }
@@ -83,7 +83,7 @@ pub fn expectFirstPacket(
     var fba: heap.FixedBufferAllocator = .init(string_buffer);
     var br: Io.Reader = .fixed(body);
 
-    return nrmpb.decode(.main, nrmpb.main.PlayerGetTokenCsReq, fba.allocator(), &br) catch
+    return rmpb.decode(.main, rmpb.main.PlayerGetTokenCsReq, fba.allocator(), &br) catch
         return error.MalformedPayload;
 }
 
@@ -93,7 +93,7 @@ pub fn sendMessage(
     multi_conversation: *kcp.MultiConversation,
     xorpad: *const Xorpad,
     client: u32,
-    head: nrmpb.stable.PacketHead,
+    head: rmpb.stable.PacketHead,
     cmd_id: u16,
     message: anytype,
 ) SendMessageError!void {
@@ -117,6 +117,6 @@ const heap = std.heap;
 
 const kcp = @import("kcp.zig");
 
-const nrmcrypt = @import("nrmcrypt");
-const nrmpb = @import("nrmpb");
+const rmcrypt = @import("rmcrypt");
+const rmpb = @import("rmpb");
 const std = @import("std");

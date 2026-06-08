@@ -17,5 +17,5 @@ pub fn enterSectionComplete(txn: handlers.Transaction(.EnterSectionCompleteCsReq
 
 const handlers = @import("../handlers.zig");
 
-const pb = @import("nrmpb").main;
+const pb = @import("rmpb").main;
 const std = @import("std");
