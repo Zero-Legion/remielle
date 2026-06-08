@@ -26,7 +26,7 @@ const CmdId = CmdId: {
 
 pub const ProcessError = error{
     DecodeFail,
-} || Allocator.Error || SendMessageError;
+} || Allocator.Error || messaging.SendMessageError;
 
 pub fn process(
     arena: Allocator,
@@ -103,8 +103,6 @@ pub fn process(
     }
 }
 
-pub const SendMessageError = error{MessageOversize};
-
 pub fn Transaction(comptime message_name: @EnumLiteral()) type {
     return struct {
         const Txn = @This();
@@ -138,7 +136,7 @@ pub fn Transaction(comptime message_name: @EnumLiteral()) type {
         pub fn respond(
             txn: *const Txn,
             rsp: Response,
-        ) SendMessageError!void {
+        ) messaging.SendMessageError!void {
             const id = (comptime nrmpb.cmdId(Response)) orelse {
                 try sendDummy(txn.multi_conversation, txn.cvars, txn.client_index, txn.packet_id);
                 log.debug(
@@ -150,7 +148,7 @@ pub fn Transaction(comptime message_name: @EnumLiteral()) type {
 
             defer txn.cvars.packet_id_counters[txn.client_index] += 1;
 
-            try sendMessage(txn.multi_conversation, &txn.cvars.xorpads[txn.client_index], txn.client_index, .{
+            try messaging.sendMessage(txn.multi_conversation, &txn.cvars.xorpads[txn.client_index], txn.client_index, .{
                 .packet_id = txn.cvars.packet_id_counters[txn.client_index],
                 .ack_packet_id = txn.packet_id,
             }, id, rsp);
@@ -165,14 +163,14 @@ pub fn Transaction(comptime message_name: @EnumLiteral()) type {
             txn: *const Txn,
             comptime ntf_name: @EnumLiteral(),
             ntf: @field(nrmpb.main, @tagName(ntf_name)),
-        ) SendMessageError!void {
+        ) messaging.SendMessageError!void {
             const id = (comptime nrmpb.cmdId(@TypeOf(ntf))) orelse {
                 log.debug("notify of type " ++ @typeName(Response) ++ " is not described", .{});
                 return;
             };
 
             defer txn.cvars.packet_id_counters[txn.client_index] += 1;
-            try sendMessage(txn.multi_conversation, &txn.cvars.xorpads[txn.client_index], txn.client_index, .{
+            try messaging.sendMessage(txn.multi_conversation, &txn.cvars.xorpads[txn.client_index], txn.client_index, .{
                 .packet_id = txn.cvars.packet_id_counters[txn.client_index],
             }, id, ntf);
 
@@ -182,27 +180,6 @@ pub fn Transaction(comptime message_name: @EnumLiteral()) type {
             );
         }
     };
-}
-
-fn sendMessage(
-    multi_conversation: *kcp.MultiConversation,
-    xorpad: *const messaging.Xorpad,
-    client: u32,
-    head: nrmpb.stable.PacketHead,
-    cmd_id: u16,
-    message: anytype,
-) SendMessageError!void {
-    const length = messaging.encodingLength(head, message);
-
-    var writer = try multi_conversation.writer(client, length);
-
-    messaging.encode(
-        &writer.interface,
-        xorpad,
-        cmd_id,
-        head,
-        message,
-    ) catch unreachable;
 }
 
 fn sendDummy(multi_conversation: *kcp.MultiConversation, cvars: *ClientVariables, client: u32, packet_id: u32) !void {
@@ -218,7 +195,7 @@ fn sendDummy(multi_conversation: *kcp.MultiConversation, cvars: *ClientVariables
     const dummy: DummyCmd = .{};
     defer cvars.packet_id_counters[client] += 1;
 
-    try sendMessage(multi_conversation, &cvars.xorpads[client], client, .{
+    try messaging.sendMessage(multi_conversation, &cvars.xorpads[client], client, .{
         .packet_id = cvars.packet_id_counters[client],
         .ack_packet_id = packet_id,
     }, DummyCmd.cmd_id, dummy);

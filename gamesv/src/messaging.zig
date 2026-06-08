@@ -87,11 +87,35 @@ pub fn expectFirstPacket(
         return error.MalformedPayload;
 }
 
+pub const SendMessageError = error{MessageOversize};
+
+pub fn sendMessage(
+    multi_conversation: *kcp.MultiConversation,
+    xorpad: *const Xorpad,
+    client: u32,
+    head: nrmpb.stable.PacketHead,
+    cmd_id: u16,
+    message: anytype,
+) SendMessageError!void {
+    const length = encodingLength(head, message);
+    var writer = try multi_conversation.writer(client, length);
+
+    encode(
+        &writer.interface,
+        xorpad,
+        cmd_id,
+        head,
+        message,
+    ) catch unreachable;
+}
+
 const readInt = std.mem.readInt;
 
 const Io = std.Io;
 
 const heap = std.heap;
+
+const kcp = @import("kcp.zig");
 
 const nrmcrypt = @import("nrmcrypt");
 const nrmpb = @import("nrmpb");

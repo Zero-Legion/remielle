@@ -194,6 +194,71 @@ pub fn bind(
     }
 
     log.info("shutting down...", .{});
+
+    const current_time = posix.clock_gettime(.REALTIME) catch |err| switch (err) {
+        error.UnsupportedClock => std.mem.zeroes(posix.timespec),
+    };
+
+    for (server.conv_map.values()) |client_index| {
+        notifyPlayerKick(
+            .uncancelable, // We've already acknowledged cancelation.
+            &server,
+            server_fd,
+            current_time,
+            client_index,
+            .PlayerKickReason_ServerClose,
+        ) catch {};
+    }
+}
+
+/// Sends `PlayerKickScNotify` followed by disconnection control packet.
+fn notifyPlayerKick(
+    cancelation: *const Cancelation,
+    server: *Server,
+    server_fd: posix.socket_t,
+    current_time: posix.timespec,
+    index: u32,
+    reason: nrmpb.main.PlayerKickReason,
+) !void {
+    const cmd_id = ((comptime nrmpb.Descriptors.main.message(
+        nrmpb.main.PlayerKickScNotify,
+    )) orelse return).descriptor.cmd_id;
+
+    const notify: nrmpb.main.PlayerKickScNotify = .{ .reason = reason };
+
+    try messaging.sendMessage(
+        &server.multi_conversation,
+        &server.cvars.xorpads[index],
+        index,
+        .{ .packet_id = server.cvars.packet_id_counters[index] },
+        cmd_id,
+        notify,
+    );
+
+    try drainOutgoingPackets(
+        cancelation,
+        server_fd,
+        current_time,
+        &server.multi_conversation,
+        index,
+        &server.cvars.addrs[index],
+    );
+
+    var ctl: [kcp.Control.size]u8 = undefined;
+    kcp.Control.encode(
+        &ctl,
+        .disconnect,
+        server.multi_conversation.getConvIdAt(index),
+        server.multi_conversation.getTokenAt(index).downgrade(),
+        404,
+    );
+
+    try sendMessage(
+        cancelation,
+        server_fd,
+        &server.cvars.addrs[index],
+        &ctl,
+    );
 }
 
 /// Sends all of the pending packets for the session at `index`
@@ -291,5 +356,6 @@ const kcp = @import("kcp.zig");
 const Server = @import("Server.zig");
 const messaging = @import("messaging.zig");
 
+const nrmpb = @import("nrmpb");
 const nrmio = @import("nrmio");
 const std = @import("std");

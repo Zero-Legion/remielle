@@ -376,6 +376,14 @@ pub const Reader = struct {
     }
 };
 
+pub fn getConvIdAt(mc: *MultiConversation, index: u32) kcp.ConvId {
+    return mc.storage.ids[index];
+}
+
+pub fn getTokenAt(mc: *MultiConversation, index: u32) kcp.Token {
+    return mc.storage.tokens[index];
+}
+
 pub fn reader(mc: *MultiConversation, index: u32) ?Reader {
     _ = mc.peekSize(index) orelse return null;
     return .init(&mc.storage.rings[index].recv);

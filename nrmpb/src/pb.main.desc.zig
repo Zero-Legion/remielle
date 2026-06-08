@@ -1359,7 +1359,7 @@ pub const JAGADHKGLGD = struct {
     pub const IIOHENJCDAO_field_desc: FieldDesc = .{ .number = 3, .xor = 0 };
     pub const ENDJNCFHGLN_field_desc: FieldDesc = .{ .number = 5, .xor = 0 };
     pub const uid_field_desc: FieldDesc = .{ .number = 8, .xor = 3052 };
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 9, .xor = 9215 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 9, .xor = 9215 };
     pub const MFOADBPCEJA_field_desc: FieldDesc = .{ .number = 10, .xor = 0 };
     pub const data_field_desc: FieldDesc = .{ .number = 11, .xor = 0 };
     pub const KHHKPCCCEPA_field_desc: FieldDesc = .{ .number = 12, .xor = 6281 };
@@ -1445,7 +1445,7 @@ pub const KHCBEAOCJLB = struct {
     pub const ECMOPBPMNJL_field_desc: FieldDesc = .{ .number = 4, .xor = 14408 };
     pub const DONAFMHAMPB_field_desc: FieldDesc = .{ .number = 6, .xor = 0 };
     pub const MHCFBPNFCBN_field_desc: FieldDesc = .{ .number = 11, .xor = 12011 };
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 12, .xor = 0 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 12, .xor = 0 };
 };
 
 pub const OOAJHDOMNAP = struct {
@@ -1728,7 +1728,7 @@ pub const OEKPDAGKNCD = struct {
 };
 
 pub const AGPCFKHALMP = struct {
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 1, .xor = 0 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 1, .xor = 0 };
     pub const APJDJGOIBDB_field_desc: FieldDesc = .{ .number = 2, .xor = 0 };
     pub const MIAAKHFLCBH_field_desc: FieldDesc = .{ .number = 3, .xor = 0 };
     pub const FMKNFCKJLGH_field_desc: FieldDesc = .{ .number = 4, .xor = 0 };
@@ -1747,7 +1747,7 @@ pub const AFEFDABNKDI = struct {
 
 pub const BJLBDBHBCMG = struct {
     pub const cmd_id: u16 = 165;
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 1, .xor = 2904 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 1, .xor = 2904 };
     pub const NOOLLBPLEBJ_field_desc: FieldDesc = .{ .number = 2, .xor = 0 };
     pub const CPGJIENHKLF_field_desc: FieldDesc = .{ .number = 3, .xor = 8021 };
     pub const DHHOOJGGLOM_field_desc: FieldDesc = .{ .number = 4, .xor = 10090 };
@@ -2038,7 +2038,7 @@ pub const OCKOCFKHKNJ = struct {
     pub const group_id_field_desc: FieldDesc = .{ .number = 7, .xor = 9741 };
     pub const NDANGBCBPJF_field_desc: FieldDesc = .{ .number = 8, .xor = 2746 };
     pub const ECMOPBPMNJL_field_desc: FieldDesc = .{ .number = 13, .xor = 8180 };
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 14, .xor = 0 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 14, .xor = 0 };
 };
 
 pub const PMDBGKHOKNC = struct {
@@ -2440,7 +2440,7 @@ pub const MEHPJOPLMHM = struct {
 
 pub const DIPNGOPKKDK = struct {
     pub const cmd_id: u16 = 2211;
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 4, .xor = 0 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 4, .xor = 0 };
 };
 
 pub const BGCEIJFIJGF = struct {
@@ -3698,7 +3698,7 @@ pub const PPMMIOOGEMO = struct {
     pub const cmd_id: u16 = 6602;
     pub const group_id_field_desc: FieldDesc = .{ .number = 5, .xor = 11766 };
     pub const index_field_desc: FieldDesc = .{ .number = 6, .xor = 213 };
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 8, .xor = 0 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 8, .xor = 0 };
 };
 
 pub const BLODIONFEHP = struct {
@@ -4583,7 +4583,7 @@ pub const FOKCHLLNMJA = struct {
 
 pub const OIODIHMPBKB = struct {
     pub const cmd_id: u16 = 9520;
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 2, .xor = 0 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 2, .xor = 0 };
     pub const CLOHKLIKIMD_field_desc: FieldDesc = .{ .number = 3, .xor = 0 };
     pub const group_id_field_desc: FieldDesc = .{ .number = 12, .xor = 9627 };
 };
@@ -5513,7 +5513,7 @@ pub const IPFGBELGAPI = struct {
 pub const ABLMBEKHJGD = struct {
     pub const cmd_id: u16 = 3133;
     pub const ACDGNDLMDJI_field_desc: FieldDesc = .{ .number = 2, .xor = 0 };
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 4, .xor = 0 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 4, .xor = 0 };
     pub const HBBCKKKFMFL_field_desc: FieldDesc = .{ .number = 5, .xor = 1719 };
     pub const MIBNKEMNHAD_field_desc: FieldDesc = .{ .number = 6, .xor = 0 };
     pub const HNINOFAMNMN_field_desc: FieldDesc = .{ .number = 7, .xor = 0 };
@@ -8012,7 +8012,7 @@ pub const LGGHKGLIMAL = struct {
 pub const CAKCKKPAMKI = struct {
     pub const cmd_id: u16 = 448;
     pub const PLFBHFOCHOM_field_desc: FieldDesc = .{ .number = 4, .xor = 0 };
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 6, .xor = 0 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 6, .xor = 0 };
 };
 
 pub const AreaMapData = struct {
@@ -9491,7 +9491,7 @@ pub const NJHOENCMKLM = struct {
 pub const JJHEGJJLGAF = struct {
     pub const cmd_id: u16 = 415;
     pub const index_field_desc: FieldDesc = .{ .number = 5, .xor = 11845 };
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 6, .xor = 0 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 6, .xor = 0 };
     pub const group_id_field_desc: FieldDesc = .{ .number = 14, .xor = 8517 };
 };
 
@@ -9644,7 +9644,7 @@ pub const HMOIOKBEFAC = struct {
 
 pub const BKNAIEEAJJA = struct {
     pub const cmd_id: u16 = 2870;
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 14, .xor = 0 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 14, .xor = 0 };
 };
 
 pub const MDHDAIBBDLH = struct {
@@ -11712,7 +11712,7 @@ pub const GCJOOCHKIJJ = struct {
 pub const JNADJNILNBG = struct {
     pub const cmd_id: u16 = 3205;
     pub const group_id_field_desc: FieldDesc = .{ .number = 1, .xor = 13307 };
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 8, .xor = 0 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 8, .xor = 0 };
     pub const LCMIFOGGJLM_field_desc: FieldDesc = .{ .number = 14, .xor = 2023 };
 };
 
@@ -13164,7 +13164,7 @@ pub const GFEDKLFAEAM = struct {
 pub const KBGLBPPMEML = struct {
     pub const cmd_id: u16 = 1792;
     pub const MHCFBPNFCBN_field_desc: FieldDesc = .{ .number = 1, .xor = 9228 };
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 3, .xor = 0 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 3, .xor = 0 };
     pub const NAICOPDPMHC_field_desc: FieldDesc = .{ .number = 5, .xor = 0 };
     pub const group_id_field_desc: FieldDesc = .{ .number = 14, .xor = 11589 };
 };
@@ -13463,7 +13463,7 @@ pub const EMHMDNLONFD = struct {
 
 pub const IGILBAKKLLA = struct {
     pub const cmd_id: u16 = 6787;
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 3, .xor = 0 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 3, .xor = 0 };
 };
 
 pub const LDKKCCFBMKH = struct {
@@ -15472,7 +15472,7 @@ pub const JLLFFNHNNFD = struct {
 };
 
 pub const LHPLJNEJIGN = struct {
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 2, .xor = 14459 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 2, .xor = 14459 };
     pub const KIFIFGFDIOD_field_desc: FieldDesc = .{ .number = 3, .xor = 0 };
     pub const EOJNAONNHJB_field_desc: FieldDesc = .{ .number = 9, .xor = 3746 };
 };
@@ -16094,7 +16094,7 @@ pub const EnterSectionCsReq = struct {
     pub const DHHOOJGGLOM_field_desc: FieldDesc = .{ .number = 6, .xor = 10004 };
     pub const transform_id_field_desc: FieldDesc = .{ .number = 8, .xor = 0 };
     pub const AAACLCBKMJE_field_desc: FieldDesc = .{ .number = 9, .xor = 1908 };
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 10, .xor = 2893 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 10, .xor = 2893 };
     pub const owner_type_field_desc: FieldDesc = .{ .number = 11, .xor = 0 };
     pub const section_id_field_desc: FieldDesc = .{ .number = 12, .xor = 6568 };
     pub const position_field_desc: FieldDesc = .{ .number = 14, .xor = 0 };
@@ -17312,7 +17312,7 @@ pub const KIAAHCJNLBI = struct {
     pub const ODDIDKMHAFN_field_desc: FieldDesc = .{ .number = 11, .xor = 0 };
     pub const DBNCICDBEHO_field_desc: FieldDesc = .{ .number = 12, .xor = 0 };
     pub const LIOKOLBMLCM_field_desc: FieldDesc = .{ .number = 13, .xor = 0 };
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 14, .xor = 9173 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 14, .xor = 9173 };
     pub const PJKLJPIALFO_field_desc: FieldDesc = .{ .number = 15, .xor = 0 };
     pub const EJMBOLOLHJD_field_desc: FieldDesc = .{ .number = 735, .xor = 0 };
 };
@@ -17668,7 +17668,7 @@ pub const FPIPDJLFEOC = struct {
     pub const group_id_field_desc: FieldDesc = .{ .number = 1, .xor = 0 };
     pub const CLOHKLIKIMD_field_desc: FieldDesc = .{ .number = 2, .xor = 0 };
     pub const AKCHHGNIEGL_field_desc: FieldDesc = .{ .number = 3, .xor = 0 };
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 4, .xor = 0 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 4, .xor = 0 };
     pub const JGDMIDBKHDN_field_desc: FieldDesc = .{ .number = 5, .xor = 0 };
     pub const HDFANGFCCIC_field_desc: FieldDesc = .{ .number = 6, .xor = 0 };
     pub const LCMIFOGGJLM_field_desc: FieldDesc = .{ .number = 7, .xor = 0 };
@@ -19144,7 +19144,7 @@ pub const GELPAGLMFLN = struct {
 pub const IDHANLNCIDI = struct {
     pub const cmd_id: u16 = 5087;
     pub const NOBPMGNEDLI_field_desc: FieldDesc = .{ .number = 1, .xor = 0 };
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 2, .xor = 0 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 2, .xor = 0 };
 };
 
 pub const BBFIGPNEHDO = struct {
@@ -19465,7 +19465,7 @@ pub const DDJDFGDLHPM = struct {
     pub const cmd_id: u16 = 5745;
     pub const DHHOOJGGLOM_field_desc: FieldDesc = .{ .number = 3, .xor = 2518 };
     pub const KLEFMKIICBE_field_desc: FieldDesc = .{ .number = 9, .xor = 0 };
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 13, .xor = 0 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 13, .xor = 0 };
 };
 
 pub const OIGACJCKLNB = struct {
@@ -20987,7 +20987,7 @@ pub const KDBOFNLJGNO = struct {
 
 pub const JDEBIKLMOID = struct {
     pub const cmd_id: u16 = 1759;
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 7, .xor = 0 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 7, .xor = 0 };
     pub const index_field_desc: FieldDesc = .{ .number = 10, .xor = 11006 };
     pub const group_id_field_desc: FieldDesc = .{ .number = 13, .xor = 4387 };
 };
@@ -22042,7 +22042,7 @@ pub const FCMKGOCNIKD = struct {
 pub const EMLOHJDBICC = struct {
     pub const cmd_id: u16 = 1544;
     pub const NADDLLHLKML_field_desc: FieldDesc = .{ .number = 6, .xor = 10813 };
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 8, .xor = 0 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 8, .xor = 0 };
     pub const section_id_field_desc: FieldDesc = .{ .number = 10, .xor = 7961 };
     pub const ILHPMOEAKIM_field_desc: FieldDesc = .{ .number = 13, .xor = 0 };
     pub const position_field_desc: FieldDesc = .{ .number = 14, .xor = 0 };
@@ -23024,9 +23024,9 @@ pub const OBBKJJBCPFO = struct {
     pub const cmd_id: u16 = 5653;
 };
 
-pub const LDNOKMONCFL = struct {
+pub const PlayerKickScNotify = struct {
     pub const cmd_id: u16 = 9890;
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 1, .xor = 0 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 1, .xor = 0 };
     pub const EPPDHEMPHPL_field_desc: FieldDesc = .{ .number = 10, .xor = 11939 };
 };
 
@@ -23563,7 +23563,7 @@ pub const GLEEIOMMEDM = struct {
 
 pub const JBOPILNLMBL = struct {
     pub const cmd_id: u16 = 9674;
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 5, .xor = 0 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 5, .xor = 0 };
 };
 
 pub const FIEJNIFJGNI = struct {
@@ -23701,7 +23701,7 @@ pub const FJGEHKEMEHO = struct {
     pub const IFCPKJEIOEC_field_desc: FieldDesc = .{ .number = 7, .xor = 0 };
     pub const HGPLABBLNKP_field_desc: FieldDesc = .{ .number = 8, .xor = 0 };
     pub const HKEPLPIOKDL_field_desc: FieldDesc = .{ .number = 9, .xor = 0 };
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 10, .xor = 0 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 10, .xor = 0 };
     pub const JKIDCMAMABK_field_desc: FieldDesc = .{ .number = 11, .xor = 0 };
     pub const DEPEJLLFHMA_field_desc: FieldDesc = .{ .number = 12, .xor = 0 };
     pub const JCCLOMKJIAO_field_desc: FieldDesc = .{ .number = 13, .xor = 0 };
@@ -25223,7 +25223,7 @@ pub const EJEHCOBDKAN = struct {
 pub const IDPDIPDPFGA = struct {
     pub const cmd_id: u16 = 8740;
     pub const group_id_field_desc: FieldDesc = .{ .number = 8, .xor = 11956 };
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 10, .xor = 0 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 10, .xor = 0 };
     pub const index_field_desc: FieldDesc = .{ .number = 11, .xor = 4228 };
 };
 
@@ -25556,7 +25556,7 @@ pub const ADMFJAGEIFB = struct {
     pub const cmd_id: u16 = 3654;
     pub const ACDGNDLMDJI_field_desc: FieldDesc = .{ .number = 3, .xor = 0 };
     pub const PGECHPCNHLO_field_desc: FieldDesc = .{ .number = 4, .xor = 0 };
-    pub const NFFMPPPKFEH_field_desc: FieldDesc = .{ .number = 5, .xor = 0 };
+    pub const reason_field_desc: FieldDesc = .{ .number = 5, .xor = 0 };
     pub const ADLJBAKCKGE_field_desc: FieldDesc = .{ .number = 8, .xor = 843 };
     pub const NBDODONOJHO_field_desc: FieldDesc = .{ .number = 11, .xor = 9182 };
     pub const IOILBKBPICF_field_desc: FieldDesc = .{ .number = 13, .xor = 2800 };
