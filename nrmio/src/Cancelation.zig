@@ -12,6 +12,18 @@ pub const init: Cancelation = .{
     .set = .init(false),
 };
 
+/// An instance of `Cancelation`, `cancelRequested` of which is never `true`.
+/// Use this instance in the following scenarios:
+/// * You have to call a function that respects cancelation from the function that doesn't.
+///
+/// * You have already acknowledged the cancelation, but have to perform additional operations
+/// in order to complete it.
+///
+/// For example: performing I/O inside of shutdown sequence.
+pub const uncancelable: *const Cancelation = &.{
+    .set = .init(false),
+};
+
 /// All subsequent `cancelRequested` calls will return `true`.
 pub fn cancel(c: *Cancelation) void {
     c.set.store(true, .monotonic);
