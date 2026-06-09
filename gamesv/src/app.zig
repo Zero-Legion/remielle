@@ -220,10 +220,7 @@ fn notifyPlayerKick(
     index: u32,
     reason: rmpb.main.PlayerKickReason,
 ) !void {
-    const cmd_id = ((comptime rmpb.Descriptors.main.message(
-        rmpb.main.PlayerKickScNotify,
-    )) orelse return).descriptor.cmd_id;
-
+    const cmd_id = (comptime rmpb.cmdId(rmpb.main.PlayerKickScNotify)) orelse return;
     const notify: rmpb.main.PlayerKickScNotify = .{ .reason = reason };
 
     try messaging.sendMessage(

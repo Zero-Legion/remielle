@@ -18,7 +18,7 @@ pub const Descriptors = enum {
         };
     }
 
-    pub inline fn message(comptime set: Descriptors, comptime M: type) ?Message {
+    pub inline fn describe(comptime set: Descriptors, comptime M: type) ?Message {
         const ns = set.namespace();
 
         if (!@hasDecl(M, "pb_desc_name"))
@@ -57,7 +57,7 @@ pub const Descriptors = enum {
 };
 
 pub inline fn cmdId(comptime M: type) ?u16 {
-    return if (Descriptors.main.message(M)) |desc|
+    return if (Descriptors.main.describe(M)) |desc|
         desc.descriptor.cmd_id
     else
         null;
@@ -101,7 +101,7 @@ pub fn encodingLength(comptime desc_set: Descriptors, message: anytype) u64 {
 
 pub fn encode(comptime desc_set: Descriptors, writer: *Io.Writer, message: anytype) Io.Writer.Error!void {
     const Message = @TypeOf(message);
-    const descriptor = desc_set.message(Message) orelse
+    const descriptor = desc_set.describe(Message) orelse
         return;
 
     const struct_info = @typeInfo(Message).@"struct";
@@ -185,7 +185,7 @@ pub fn decode(
     arena: Allocator,
     reader: *Io.Reader,
 ) DecodeError!Message {
-    const descriptor = comptime desc_set.message(Message) orelse
+    const descriptor = comptime desc_set.describe(Message) orelse
         return .init;
 
     const struct_info = @typeInfo(Message).@"struct";

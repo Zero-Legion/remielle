@@ -101,7 +101,7 @@ pub fn onAuthSucceeded(
     const length = messaging.encodingLength(.init, auth_response);
     var writer = try server.multi_conversation.writer(client, length);
 
-    const cmd_id = comptime rmpb.Descriptors.main.message(rmpb.main.PlayerGetTokenScRsp).?.descriptor.cmd_id;
+    const cmd_id = comptime rmpb.cmdId(rmpb.main.PlayerGetTokenScRsp).?;
     messaging.encode(&writer.interface, .initial, cmd_id, .init, auth_response) catch unreachable;
 
     server.conv_map.putAssumeCapacity(conv_id, client);
