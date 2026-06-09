@@ -222,7 +222,6 @@ fn notifyPlayerKick(
     index: u32,
     reason: rmpb.main.PlayerKickReason,
 ) !void {
-    const cmd_id = (comptime rmpb.cmdId(rmpb.main.PlayerKickScNotify)) orelse return;
     const notify: rmpb.main.PlayerKickScNotify = .{ .reason = reason };
 
     try messaging.sendMessage(
@@ -230,7 +229,7 @@ fn notifyPlayerKick(
         &server.cvars.xorpads[index],
         index,
         .{ .packet_id = server.cvars.packet_id_counters[index] },
-        cmd_id,
+        rmpb.cmdId(rmpb.main.PlayerKickScNotify).?,
         notify,
     );
 
