@@ -131,6 +131,9 @@ pub fn build(b: *Build) void {
 const gamesv_assets: []const StaticAsset = &.{
     .asset("config", "gamesv/config.zon"),
     .asset("initial_xorpad", "gamesv/initial_xorpad.bytes"),
+
+    // Filecfg
+    .asset("AvatarBaseTemplateTb", "assets/filecfg/AvatarBaseTemplateTb.zon"),
 };
 
 const dpsv_assets: []const StaticAsset = &.{
