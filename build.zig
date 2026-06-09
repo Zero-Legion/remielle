@@ -135,6 +135,7 @@ const gamesv_assets: []const StaticAsset = &.{
     // Filecfg
     .asset("AvatarBaseTemplateTb", "assets/filecfg/AvatarBaseTemplateTb.zon"),
     .asset("UnlockConfigTemplateTb", "assets/filecfg/UnlockConfigTemplateTb.zon"),
+    .asset("PostGirlConfigTemplateTb", "assets/filecfg/PostGirlConfigTemplateTb.zon"),
 };
 
 const dpsv_assets: []const StaticAsset = &.{

@@ -11,14 +11,17 @@ pub fn getMiscData(txn: handlers.Transaction(.GetMiscDataCsReq)) !void {
     for (templates.unlock_config.entries) |config|
         unlocked_list.appendAssumeCapacity(@intCast(config.id));
 
-    var post_girls_buffer: [1]pb.PostGirlItem = undefined;
-    var post_girls: std.ArrayList(pb.PostGirlItem) = .initBuffer(&post_girls_buffer);
+    var post_girls_buf: [templates.post_girl_config.entries.len]pb.PostGirlItem = undefined;
+    var post_girls: std.ArrayList(pb.PostGirlItem) = .initBuffer(&post_girls_buf);
 
-    var show_post_girls_buffer: [1]u32 = undefined;
-    var show_post_girls: std.ArrayList(u32) = .initBuffer(&show_post_girls_buffer);
-    show_post_girls.appendSliceAssumeCapacity(&.{3500001});
+    for (templates.post_girl_config.entries) |config|
+        post_girls.appendAssumeCapacity(.{ .id = config.id });
 
-    post_girls.appendAssumeCapacity(.{ .id = 3500001 });
+    var show_post_girls_buf: [1]u32 = .{
+        @intFromEnum(templates.post_girl_config.Id.Avatar_Female_Size03_Promeia),
+    };
+
+    const show_post_girls: std.ArrayList(u32) = .fromOwnedSlice(&show_post_girls_buf);
 
     try txn.respond(.{ .data = .{
         .unlock = .{ .unlocked_list = unlocked_list },

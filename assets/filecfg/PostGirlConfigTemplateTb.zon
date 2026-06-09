@@ -1,0 +1,292 @@
+.{
+    .{
+        .id = 3500000,
+        .name = "Avatar_Male_Size01_Wise",
+        .unlock_condition = "30070001",
+    },
+    .{
+        .id = 3500001,
+        .name = "Avatar_Female_Size02_Belle",
+        .unlock_condition = "30070001",
+    },
+    .{
+        .id = 3510000,
+        .name = "Avatar_Female_Size02_Anbi",
+        .unlock_condition = "1051211000",
+    },
+    .{
+        .id = 3510001,
+        .name = "Avatar_Female_Size01_Tsubaki",
+        .unlock_condition = "1051211001",
+    },
+    .{
+        .id = 3510002,
+        .name = "Avatar_Female_Size02_Nostradamus",
+        .unlock_condition = "1051211002",
+    },
+    .{
+        .id = 3510003,
+        .name = "Avatar_Male_Size03_Billy",
+        .unlock_condition = "1051211003",
+    },
+    .{
+        .id = 3510004,
+        .name = "Avatar_Female_Size02_Longinus",
+        .unlock_condition = "1051211004",
+    },
+    .{
+        .id = 3510005,
+        .name = "Avatar_Female_Size01_OokumaMari",
+        .unlock_condition = "1051211005",
+    },
+    .{
+        .id = 3510006,
+        .name = "Avatar_Male_Size03_Ben",
+        .unlock_condition = "1051211006",
+    },
+    .{
+        .id = 3510007,
+        .name = "Avatar_Female_Size03_Lisa",
+        .unlock_condition = "1051211007",
+    },
+    .{
+        .id = 3510008,
+        .name = "Avatar_Male_Size03_Anton",
+        .unlock_condition = "1051211008",
+    },
+    .{
+        .id = 3510009,
+        .name = "Avatar_Male_Size03_Lycaon",
+        .unlock_condition = "1051211009",
+    },
+    .{
+        .id = 3510010,
+        .name = "Avatar_Female_Size02_Ellen",
+        .unlock_condition = "1051211010",
+    },
+    .{
+        .id = 3510011,
+        .name = "Avatar_Female_Size03_Rina",
+        .unlock_condition = "1051211011",
+    },
+    .{
+        .id = 3510012,
+        .name = "Avatar_Female_Size01_Corin",
+        .unlock_condition = "1051211012",
+    },
+    .{
+        .id = 3510013,
+        .name = "Avatar_Female_Size03_ZhuYuan",
+        .unlock_condition = "1051211013",
+    },
+    .{
+        .id = 3510014,
+        .name = "Avatar_Female_Size01_QingYi",
+        .unlock_condition = "1051211014",
+    },
+    .{
+        .id = 3510015,
+        .name = "Avatar_Male_Size01_Seth",
+        .unlock_condition = "1051211015",
+    },
+    .{
+        .id = 3510016,
+        .name = "Avatar_Female_Size03_JaneDoe",
+        .unlock_condition = "1051211016",
+    },
+    .{
+        .id = 3510017,
+        .name = "Avatar_Female_Size03_Caesar",
+        .unlock_condition = "1051211017",
+    },
+    .{
+        .id = 3510018,
+        .name = "Avatar_Female_Size02_Burnice",
+        .unlock_condition = "1051211018",
+    },
+    .{
+        .id = 3510019,
+        .name = "Avatar_Female_Size01_Clara",
+        .unlock_condition = "1051211019",
+    },
+    .{
+        .id = 3510020,
+        .name = "Avatar_Female_Size01_Lucy",
+        .unlock_condition = "1051211020",
+    },
+    .{
+        .id = 3510021,
+        .name = "Avatar_Male_Size02_Lighter",
+        .unlock_condition = "1051211021",
+    },
+    .{
+        .id = 3510022,
+        .name = "Avatar_Female_Size03_Yanagi",
+        .unlock_condition = "1051211022",
+    },
+    .{
+        .id = 3510023,
+        .name = "Avatar_Female_Size02_Unagi",
+        .unlock_condition = "1051211024",
+    },
+    .{
+        .id = 3510024,
+        .name = "Avatar_Male_Size01_Harumasa",
+        .unlock_condition = "1051211023",
+    },
+    .{
+        .id = 3510025,
+        .name = "Avatar_Female_Size01_Aokaku",
+        .unlock_condition = "1051211025",
+    },
+    .{
+        .id = 3510026,
+        .name = "Avatar_Female_Size03_Astra",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510027,
+        .name = "Avatar_Female_Size03_Evelyn",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510028,
+        .name = "Avatar_Female_Size03_Trigger",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510029,
+        .name = "Avatar_Female_Size02_SilverAnby",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510030,
+        .name = "Avatar_Female_Size03_Pulchra",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510031,
+        .name = "Avatar_Male_Size02_HugoVlad",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510032,
+        .name = "Avatar_Female_Size02_Vivian",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510033,
+        .name = "Avatar_Female_Size01_Jufufu",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510034,
+        .name = "Avatar_Female_Size03_YiXuan",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510035,
+        .name = "Avatar_Male_Size03_PanYinhu",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510036,
+        .name = "Avatar_Female_Size02_Alice",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510037,
+        .name = "Avatar_Female_Size02_Yuzuha",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510038,
+        .name = "Avatar_Female_Size02_Seed",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510039,
+        .name = "Avatar_Female_Size02_Brujas",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510040,
+        .name = "Avatar_Female_Size02_Lucia",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510041,
+        .name = "Avatar_Female_Size03_Yidhari",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510042,
+        .name = "Avatar_Male_Size03_Norano",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510043,
+        .name = "Avatar_Female_Size01_Azural",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510044,
+        .name = "Avatar_Male_Size03_BanYue",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510045,
+        .name = "Avatar_Female_Size02_Zhenzhen",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510046,
+        .name = "Avatar_Female_Size00_XiaoZhao",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510047,
+        .name = "Avatar_Female_Size01_Summer",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510048,
+        .name = "Avatar_Female_Size01_Aria",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510049,
+        .name = "Avatar_Female_Size01_NangongYu",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510050,
+        .name = "Avatar_Female_Size02_Cissia",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510051,
+        .name = "Avatar_Female_Size03_Promeia",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510052,
+        .name = "Avatar_Male_Size03_SPBilly",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3550000,
+        .name = "LiveWallpaper_Activity001",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3550001,
+        .name = "LiveWallpaper_Activity002",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3590001,
+        .name = "LiveWallpaper_ActivityAngelsOfDelusion",
+        .unlock_condition = "",
+    },
+}

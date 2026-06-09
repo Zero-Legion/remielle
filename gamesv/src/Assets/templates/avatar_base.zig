@@ -38,7 +38,7 @@ pub const Template = struct {
     full_name: []const u8,
     audio_event_replace_param: [:0]const u8,
 
-    pub fn getId(t: Template) Id {
+    pub inline fn getId(t: *const Template) Id {
         return @enumFromInt(t.id);
     }
 };
