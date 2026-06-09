@@ -425,7 +425,10 @@ pub const AcceptError = error{
 pub fn accept(fd: socket_t, addr: *Sockaddr, flags: SOCK.Flags) AcceptError!socket_t {
     var addrlen: socklen_t = addr.len();
 
-    if (@hasDecl(sys, "accept4")) {
+    if (@hasDecl(sys, "accept4") and
+        // Even though it's declared, there's no `accept4` on darwin.
+        !is_darwin)
+    {
         const rc = sys.accept4(fd, addr.rawMut(), &addrlen, @intFromEnum(flags));
         return switch (sys.errno(rc)) {
             .SUCCESS => @intCast(rc),
@@ -471,7 +474,7 @@ pub fn accept(fd: socket_t, addr: *Sockaddr, flags: SOCK.Flags) AcceptError!sock
     };
 
     if (flags.isActive(.NONBLOCK)) {
-        const getfl_rc = sys.fcntl(accepted_fd, sys.F.GETFL, 0);
+        const getfl_rc = sys.fcntl(accepted_fd, sys.F.GETFL, @as(usize, 0));
         const existing_flags: usize = switch (sys.errno(getfl_rc)) {
             .SUCCESS => @intCast(getfl_rc),
             else => |e| unexpectedErrno(e),
@@ -485,7 +488,7 @@ pub fn accept(fd: socket_t, addr: *Sockaddr, flags: SOCK.Flags) AcceptError!sock
     }
 
     if (flags.isActive(.CLOEXEC)) {
-        const getfd_rc = sys.fcntl(accepted_fd, sys.F.GETFD, 0);
+        const getfd_rc = sys.fcntl(accepted_fd, sys.F.GETFD, @as(usize, 0));
         const existing_flags: usize = switch (sys.errno(getfd_rc)) {
             .SUCCESS => @intCast(getfd_rc),
             else => |e| unexpectedErrno(e),
@@ -702,7 +705,7 @@ pub fn getentropy(buf: []u8) GetEntropyError!void {
 }
 
 fn readUrandom(buf: []u8) GetEntropyError!void {
-    const open_rc = sys.open("/dev/urandom", .{}, 0);
+    const open_rc = sys.open("/dev/urandom", .{}, @as(sys.mode_t, 0));
     const fd: sys.fd_t = switch (sys.errno(open_rc)) {
         .SUCCESS => @intCast(open_rc),
         else => return error.EntropyUnavailable,
@@ -714,7 +717,7 @@ fn readUrandom(buf: []u8) GetEntropyError!void {
     while (unfilled.len != 0) {
         const read_rc = sys.read(fd, unfilled.ptr, @intCast(unfilled.len));
         switch (sys.errno(read_rc)) {
-            .SUCCESS => unfilled = unfilled[read_rc..],
+            .SUCCESS => unfilled = unfilled[@intCast(read_rc)..],
             else => return error.EntropyUnavailable,
         }
     }
@@ -765,6 +768,12 @@ const sys = switch (native_os) {
 };
 
 const is_windows = native_os == .windows;
+
+const is_darwin = switch (native_os) {
+    .driverkit, .ios, .maccatalyst, .macos, .tvos, .visionos, .watchos => true,
+    else => false,
+};
+
 const native_os = builtin.os.tag;
 
 const builtin = @import("builtin");
