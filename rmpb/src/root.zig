@@ -221,7 +221,7 @@ pub fn decode(
             field_count += 1;
         }
 
-        break :FieldNumber @Enum(u32, .exhaustive, &field_names, &field_numbers);
+        break :FieldNumber @Enum(u32, .exhaustive, field_names[0..field_count], field_numbers[0..field_count]);
     };
 
     if (field_count == 0) return .init;
