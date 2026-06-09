@@ -1,5 +1,5 @@
 pub fn getAvatarData(txn: handlers.Transaction(.GetAvatarDataCsReq)) !void {
-    var avatars_buffer: [1]pb.AvatarInfo = undefined;
+    var avatars_buffer: [templates.avatar_base.entries.len]pb.AvatarInfo = undefined;
     var avatars: std.ArrayList(pb.AvatarInfo) = .initBuffer(&avatars_buffer);
 
     var talent_switch = @as([3]bool, @splat(false)) ++ @as([3]bool, @splat(true));
@@ -16,15 +16,17 @@ pub fn getAvatarData(txn: handlers.Transaction(.GetAvatarDataCsReq)) !void {
         },
     });
 
-    avatars.appendAssumeCapacity(.{
-        .id = 1571,
-        .level = 60,
-        .rank = 6,
-        .unlocked_talent_num = 6,
-        .talent_switch_list = .{ .items = &talent_switch, .capacity = talent_switch.len },
-        .skill_type_level = avatar_skills,
-        .is_favorite = true,
-    });
+    for (templates.avatar_base.entries) |entry| if (entry.camp != 0) {
+        avatars.appendAssumeCapacity(.{
+            .id = entry.id,
+            .skill_type_level = avatar_skills,
+            .is_favorite = entry.getId() == .velina,
+            .talent_switch_list = .fromOwnedSlice(&talent_switch),
+            .level = 60,
+            .rank = 6,
+            .unlocked_talent_num = 6,
+        });
+    };
 
     try txn.respond(.{ .avatar_list = avatars });
 }
@@ -39,6 +41,9 @@ const SkillType = enum(u32) {
     assist_skill = 6,
 };
 
+const templates = Assets.templates;
+
+const Assets = @import("../../Assets.zig");
 const handlers = @import("../handlers.zig");
 
 const pb = @import("rmpb").main;

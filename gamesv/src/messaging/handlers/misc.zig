@@ -24,7 +24,7 @@ pub fn getMiscData(txn: handlers.Transaction(.GetMiscDataCsReq)) !void {
         },
         .business_card = .init,
         .player_accessory = .{
-            .control_guise_avatar_id = 1571,
+            .control_guise_avatar_id = @intFromEnum(templates.avatar_base.Id.velina),
         },
     } });
 }
@@ -64,6 +64,9 @@ const unlock_ids: []const i32 = &.{
     90008, 90009, 90010, 90011, 90012,
 };
 
+const templates = Assets.templates;
+
+const Assets = @import("../../Assets.zig");
 const handlers = @import("../handlers.zig");
 
 const posix = @import("rmio").posix;

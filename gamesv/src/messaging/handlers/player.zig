@@ -7,10 +7,13 @@ pub fn getSelfBasicInfo(txn: handlers.Transaction(.GetSelfBasicInfoCsReq)) !void
         .level = 60,
         .nick_name = "xeondev",
         .name_change_times = 1,
-        .avatar_id = 2011,
-        .control_avatar_id = 2011,
-        .control_guise_avatar_id = 1571,
+        .avatar_id = @intFromEnum(templates.avatar_base.Id.wise),
+        .control_avatar_id = @intFromEnum(templates.avatar_base.Id.wise),
+        .control_guise_avatar_id = @intFromEnum(templates.avatar_base.Id.velina),
     } });
 }
 
+const templates = Assets.templates;
+
+const Assets = @import("../../Assets.zig");
 const handlers = @import("../handlers.zig");
