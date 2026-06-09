@@ -7,6 +7,8 @@ pub const main_desc = @import("pb.main.desc.zig");
 /// Exports a subset of protocol types with their descriptors baked in. Stable.
 pub const stable = @import("pb.stable.zig");
 
+pub const features = @import("features.zig");
+
 pub const Descriptors = enum {
     main,
     stable,
@@ -30,6 +32,15 @@ pub const Descriptors = enum {
         return .{ .namespace = ns, .descriptor = @field(ns, M.pb_desc_name) };
     }
 
+    pub inline fn getDescriptorByName(comptime set: Descriptors, comptime name: []const u8) ?Message {
+        const ns = set.namespace();
+
+        return if (@hasDecl(ns, name))
+            .{ .namespace = ns, .descriptor = @field(ns, name) }
+        else
+            null;
+    }
+
     pub const Message = struct {
         namespace: type,
         descriptor: type,
@@ -46,6 +57,10 @@ pub const Descriptors = enum {
                 .number = @intCast(field_desc.number),
                 .xor = field_desc.xor,
             };
+        }
+
+        pub inline fn hasField(comptime m: Message, comptime name: []const u8) bool {
+            return @hasDecl(m.descriptor, name ++ "_field_desc");
         }
     };
 

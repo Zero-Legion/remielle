@@ -195,19 +195,21 @@ pub fn bind(
 
     log.info("shutting down...", .{});
 
-    const current_time = posix.clock_gettime(.REALTIME) catch |err| switch (err) {
-        error.UnsupportedClock => std.mem.zeroes(posix.timespec),
-    };
+    if (rmpb.features.isAvailable(.player_kick)) {
+        const current_time = posix.clock_gettime(.REALTIME) catch |err| switch (err) {
+            error.UnsupportedClock => std.mem.zeroes(posix.timespec),
+        };
 
-    for (server.conv_map.values()) |client_index| {
-        notifyPlayerKick(
-            .uncancelable, // We've already acknowledged cancelation.
-            &server,
-            server_fd,
-            current_time,
-            client_index,
-            .PlayerKickReason_ServerClose,
-        ) catch {};
+        for (server.conv_map.values()) |client_index| {
+            notifyPlayerKick(
+                .uncancelable, // We've already acknowledged cancelation.
+                &server,
+                server_fd,
+                current_time,
+                client_index,
+                .PlayerKickReason_ServerClose,
+            ) catch {};
+        }
     }
 }
 
