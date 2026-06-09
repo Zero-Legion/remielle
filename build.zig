@@ -80,9 +80,7 @@ pub fn build(b: *Build) void {
         }),
     });
 
-    dpsv.root_module.addAnonymousImport("config", .{
-        .root_source_file = b.path("dpsv/config.zon"),
-    });
+    StaticAsset.addAll(b, dpsv.root_module, dpsv_assets);
 
     const gamesv = b.addExecutable(.{
         .name = "remielle-gamesv",
@@ -99,16 +97,9 @@ pub fn build(b: *Build) void {
         }),
     });
 
+    StaticAsset.addAll(b, gamesv.root_module, gamesv_assets);
     gamesv.step.dependOn(&compile_main_descriptors.step);
     gamesv.step.dependOn(&compile_stable_definitions.step);
-
-    gamesv.root_module.addAnonymousImport("config", .{
-        .root_source_file = b.path("gamesv/config.zon"),
-    });
-
-    gamesv.root_module.addAnonymousImport("initial_xorpad", .{
-        .root_source_file = b.path("gamesv/initial_xorpad.bytes"),
-    });
 
     b.step(
         "pb",
@@ -117,6 +108,7 @@ pub fn build(b: *Build) void {
 
     const serve_dp = b.addRunArtifact(dpsv);
     const serve_game = b.addRunArtifact(gamesv);
+
     if (b.args) |args| {
         serve_dp.addArgs(args);
         serve_game.addArgs(args);
@@ -136,12 +128,38 @@ pub fn build(b: *Build) void {
     b.installArtifact(gamesv);
 }
 
+const gamesv_assets: []const StaticAsset = &.{
+    .asset("config", "gamesv/config.zon"),
+    .asset("initial_xorpad", "gamesv/initial_xorpad.bytes"),
+};
+
+const dpsv_assets: []const StaticAsset = &.{
+    .asset("config", "dpsv/config.zon"),
+};
+
 fn filesReadable(io: Io, dir: Io.Dir, path_list: []const []const u8) bool {
     for (path_list) |sub_path|
         dir.access(io, sub_path, .{ .read = true }) catch return false;
 
     return true;
 }
+
+const StaticAsset = struct {
+    import_name: []const u8,
+    sub_path: []const u8,
+
+    pub inline fn asset(import_name: []const u8, sub_path: []const u8) StaticAsset {
+        return .{ .import_name = import_name, .sub_path = sub_path };
+    }
+
+    pub fn addAll(b: *Build, module: *Build.Module, assets: []const StaticAsset) void {
+        for (assets) |a|
+            module.addAnonymousImport(
+                a.import_name,
+                .{ .root_source_file = b.path(a.sub_path) },
+            );
+    }
+};
 
 const Io = std.Io;
 const Build = std.Build;
