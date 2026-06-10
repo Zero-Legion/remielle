@@ -17,17 +17,15 @@ pub fn getMiscData(txn: handlers.Transaction(.GetMiscDataCsReq)) !void {
     for (templates.post_girl_config.entries) |config|
         post_girls.appendAssumeCapacity(.{ .id = config.id });
 
-    var show_post_girls_buf: [1]u32 = .{
+    var show_post_girls: [1]u32 = .{
         @intFromEnum(templates.post_girl_config.Id.Avatar_Female_Size03_Promeia),
     };
-
-    const show_post_girls: std.ArrayList(u32) = .fromOwnedSlice(&show_post_girls_buf);
 
     try txn.respond(.{ .data = .{
         .unlock = .{ .unlocked_list = unlocked_list },
         .post_girl = .{
             .post_girl_item_list = post_girls,
-            .show_post_girl_id_list = show_post_girls,
+            .show_post_girl_id_list = .fromOwnedSlice(&show_post_girls),
         },
         .business_card = .init,
         .player_accessory = .{

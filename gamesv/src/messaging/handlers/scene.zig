@@ -2,7 +2,7 @@ pub fn enterWorld(txn: handlers.Transaction(.EnterWorldCsReq)) !void {
     try txn.notify(.EnterSceneScNotify, .{ .scene = .{
         .scene_type = 1,
         .hall_scene_data = .{
-            .section_id = 1,
+            .section_id = @intFromEnum(templates.section_config.Id.MainCity_Street),
             .control_avatar_id = @intFromEnum(templates.avatar_base.Id.wise),
             .control_guise_avatar_id = @intFromEnum(templates.avatar_base.Id.velina),
         },
