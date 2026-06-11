@@ -1,17 +1,25 @@
-pub fn getServerTimestamp(txn: *handlers.Transaction(.GetServerTimestampCsReq, .{})) !void {
-    txn.respond(.{
-        .timestamp = @intCast(posix.timespecToMs(txn.time)),
+pub fn getServerTimestamp(
+    input: handlers.Input(pb.GetServerTimestampCsReq),
+    output: handlers.Output(pb.GetServerTimestampScRsp, .{}),
+) !void {
+    output.respond(.{
+        .timestamp = @intCast(posix.timespecToMs(input.time)),
     });
 }
 
-pub fn getMiscData(txn: *handlers.Transaction(.GetMiscDataCsReq, .{})) !void {
+pub fn getMiscData(
+    input: handlers.Input(pb.GetMiscDataCsReq),
+    output: handlers.Output(pb.GetMiscDataScRsp, .{}),
+) !void {
+    _ = input;
+
     var unlocked_list: std.ArrayList(i32) = try .initCapacity(
-        txn.arena,
+        output.arena,
         templates.unlock_config.entries.len,
     );
 
     var post_girls: std.ArrayList(pb.PostGirlItem) = try .initCapacity(
-        txn.arena,
+        output.arena,
         templates.post_girl_config.entries.len,
     );
 
@@ -21,12 +29,12 @@ pub fn getMiscData(txn: *handlers.Transaction(.GetMiscDataCsReq, .{})) !void {
     for (templates.post_girl_config.entries) |config|
         post_girls.appendAssumeCapacity(.{ .id = config.id });
 
-    var show_post_girls: std.ArrayList(u32) = try .initCapacity(txn.arena, 1);
+    var show_post_girls: std.ArrayList(u32) = try .initCapacity(output.arena, 1);
     show_post_girls.appendAssumeCapacity(
         @intFromEnum(templates.post_girl_config.Id.Avatar_Female_Size03_Promeia),
     );
 
-    txn.respond(.{ .data = .{
+    output.respond(.{ .data = .{
         .unlock = .{ .unlocked_list = unlocked_list },
         .post_girl = .{
             .post_girl_item_list = post_girls,

@@ -1,8 +1,10 @@
-pub fn enterWorld(txn: *handlers.Transaction(
-    .EnterWorldCsReq,
-    .{ .enter_scene = pb.EnterSceneScNotify },
-)) !void {
-    txn.notify(.enter_scene, .{ .scene = .{
+pub fn enterWorld(
+    input: handlers.Input(pb.EnterWorldCsReq),
+    output: handlers.Output(pb.EnterWorldScRsp, .{ .enter_scene = pb.EnterSceneScNotify }),
+) !void {
+    _ = input;
+
+    output.notify(.enter_scene, .{ .scene = .{
         .scene_type = 1,
         .hall_scene_data = .{
             .section_id = @intFromEnum(templates.section_config.Id.MainCity_Street),
@@ -11,11 +13,15 @@ pub fn enterWorld(txn: *handlers.Transaction(
         },
     } });
 
-    txn.respond(.init);
+    output.respond(.init);
 }
 
-pub fn enterSectionComplete(txn: *handlers.Transaction(.EnterSectionCompleteCsReq, .{})) !void {
-    txn.respond(.init);
+pub fn enterSectionComplete(
+    input: handlers.Input(pb.EnterSectionCompleteCsReq),
+    output: handlers.Output(pb.EnterSectionCompleteScRsp, .{}),
+) !void {
+    _ = input;
+    output.respond(.init);
 }
 
 const templates = Assets.templates;

@@ -1,11 +1,19 @@
-pub fn getAvatarData(txn: *handlers.Transaction(.GetAvatarDataCsReq, .{})) !void {
-    var avatars: std.ArrayList(pb.AvatarInfo) = try .initCapacity(txn.arena, templates.avatar_base.entries.len);
+pub fn getAvatarData(
+    input: handlers.Input(pb.GetAvatarDataCsReq),
+    output: handlers.Output(pb.GetAvatarDataScRsp, .{}),
+) !void {
+    _ = input;
 
-    var talent_switch: std.ArrayList(bool) = try .initCapacity(txn.arena, 6);
+    var avatars: std.ArrayList(pb.AvatarInfo) = try .initCapacity(
+        output.arena,
+        templates.avatar_base.entries.len,
+    );
+
+    var talent_switch: std.ArrayList(bool) = try .initCapacity(output.arena, 6);
     talent_switch.appendSliceAssumeCapacity(&(@as([3]bool, @splat(false)) ++ @as([3]bool, @splat(true))));
 
     const skill_types = comptime std.enums.values(SkillType);
-    var avatar_skills: std.ArrayList(pb.AvatarSkillLevel) = try .initCapacity(txn.arena, skill_types.len);
+    var avatar_skills: std.ArrayList(pb.AvatarSkillLevel) = try .initCapacity(output.arena, skill_types.len);
 
     for (skill_types) |skill_type| avatar_skills.appendAssumeCapacity(.{
         .skill_type = @intFromEnum(skill_type),
@@ -27,7 +35,7 @@ pub fn getAvatarData(txn: *handlers.Transaction(.GetAvatarDataCsReq, .{})) !void
         });
     };
 
-    txn.respond(.{ .avatar_list = avatars });
+    output.respond(.{ .avatar_list = avatars });
 }
 
 const SkillType = enum(u32) {

@@ -1,9 +1,17 @@
-pub fn playerLogin(txn: *handlers.Transaction(.PlayerLoginCsReq, .{})) !void {
-    txn.respond(.init);
+pub fn playerLogin(
+    input: handlers.Input(pb.PlayerLoginCsReq),
+    output: handlers.Output(pb.PlayerLoginScRsp, .{}),
+) !void {
+    _ = input;
+    output.respond(.init);
 }
 
-pub fn getSelfBasicInfo(txn: *handlers.Transaction(.GetSelfBasicInfoCsReq, .{})) !void {
-    txn.respond(.{ .self_basic_info = .{
+pub fn getSelfBasicInfo(
+    input: handlers.Input(pb.GetSelfBasicInfoCsReq),
+    output: handlers.Output(pb.GetSelfBasicInfoScRsp, .{}),
+) !void {
+    _ = input;
+    output.respond(.{ .self_basic_info = .{
         .level = 60,
         .nick_name = "xeondev",
         .name_change_times = 1,
@@ -13,6 +21,7 @@ pub fn getSelfBasicInfo(txn: *handlers.Transaction(.GetSelfBasicInfoCsReq, .{}))
     } });
 }
 
+const pb = @import("rmpb").main;
 const templates = Assets.templates;
 
 const Assets = @import("../../Assets.zig");

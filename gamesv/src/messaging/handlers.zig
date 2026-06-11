@@ -15,11 +15,11 @@ const CmdId = CmdId: {
 
     for (namespaces) |ns| for (@typeInfo(ns).@"struct".decls) |decl| {
         const fn_info = @typeInfo(@TypeOf(@field(ns, decl.name))).@"fn";
-        const TxnPtr = fn_info.params[0].type.?;
-        const Txn = @typeInfo(TxnPtr).pointer.child;
+        const InPtr = fn_info.params[0].type.?;
+        const In = @typeInfo(InPtr).pointer.child;
 
-        values = values ++ .{Txn.cmd_id orelse continue};
-        names = names ++ .{Txn.Body.pb_desc_name};
+        values = values ++ .{rmpb.cmdId(In.Message) orelse continue};
+        names = names ++ .{In.Message.pb_desc_name};
     };
 
     break :CmdId @Enum(u16, .exhaustive, names, @ptrCast(values));
@@ -67,14 +67,18 @@ pub fn process(
         inline else => |id| lookup: inline for (namespaces) |ns| {
             inline for (@typeInfo(ns).@"struct".decls) |decl| {
                 const fn_info = @typeInfo(@TypeOf(@field(ns, decl.name))).@"fn";
-                const TxnPtr = fn_info.params[0].type.?;
-                const Txn = @typeInfo(TxnPtr).pointer.child;
 
-                if (@intFromEnum(id) != Txn.cmd_id) continue;
+                const InPtr = fn_info.params[0].type.?;
+                const In = @typeInfo(InPtr).pointer.child;
 
-                const body = rmpb.decode(
+                const OutPtr = fn_info.params[1].type.?;
+                const Out = @typeInfo(OutPtr).pointer.child;
+
+                if (@intFromEnum(id) != rmpb.cmdId(In.Message)) continue;
+
+                const message = rmpb.decode(
                     .main,
-                    Txn.Body,
+                    In.Message,
                     arena,
                     &xored_reader.interface,
                 ) catch |err| switch (err) {
@@ -82,32 +86,41 @@ pub fn process(
                     else => return error.DecodeFail,
                 };
 
-                var txn: Txn = .init(arena, &body, time, cvars, client);
+                const input: In = .{
+                    .message = &message,
+                    .time = time,
+                    .cvars = cvars,
+                    .sender_index = client,
+                };
 
-                @field(ns, decl.name)(&txn) catch |err| switch (@as(ProcessError, err)) {
+                var output: Out = .init(arena);
+
+                @field(ns, decl.name)(&input, &output) catch |err| switch (@as(ProcessError, err)) {
                     else => |e| return e,
                 };
 
-                inline for (@typeInfo(@FieldType(Txn, "notifies")).@"struct".fields) |struct_field| {
-                    if (@field(txn.notifies, struct_field.name)) |notify| {
+                inline for (@typeInfo(@FieldType(Out, "notifies")).@"struct".fields) |struct_field| {
+                    if (@field(output.notifies, struct_field.name)) |notify| {
                         try messaging.send(multi_conversation, cvars, client, .notify, notify);
 
                         log.debug(
-                            Txn.log_prefix ++ "sent notify of type " ++ @TypeOf(notify).pb_desc_name ++ " to {f}",
+                            In.log_prefix ++ "sent notify of type " ++ @TypeOf(notify).pb_desc_name ++ " to {f}",
                             .{cvars.addrs[client]},
                         );
                     }
                 }
 
-                if (Txn.Response != noreturn) {
-                    if (txn.response) |response| {
-                        if (rmpb.cmdId(Txn.Response) != null) {
+                const Response = @FieldType(Out, "response");
+
+                if (Response != void) {
+                    if (output.response) |response| {
+                        if (rmpb.cmdId(@typeInfo(Response).optional.child) != null) {
                             try messaging.send(multi_conversation, cvars, client, .ack(head.packet_id), response);
                         } else {
                             try messaging.sendDummy(multi_conversation, cvars, client, .ack(head.packet_id));
 
                             log.debug(
-                                Txn.log_prefix ++ "response is not described; sent dummy to {f}",
+                                In.log_prefix ++ "response is not described; sent dummy to {f}",
                                 .{cvars.addrs[client]},
                             );
                         }
@@ -115,7 +128,7 @@ pub fn process(
                 }
 
                 log.debug(
-                    "processed message of type " ++ @typeName(Txn.Body) ++ " from {f}",
+                    "processed message of type " ++ In.Message.pb_desc_name ++ " from {f}",
                     .{cvars.addrs[client]},
                 );
 
@@ -140,65 +153,45 @@ fn NotifiesStruct(comptime definition_struct: anytype) type {
     return @Struct(.auto, null, &field_names, &field_types, &@splat(.{}));
 }
 
-pub fn Transaction(
-    comptime message_name: @EnumLiteral(),
-    comptime notifies: anytype,
-) type {
-    return struct {
-        const Txn = @This();
+pub fn Input(InMessage: type) type {
+    return *const struct {
+        const In = @This();
 
-        pub const log_prefix = "[" ++ @tagName(message_name) ++ "] ";
+        pub const Message = InMessage;
+        pub const log_prefix = "[" ++ InMessage.pb_desc_name ++ "] ";
 
-        pub const Body = @field(rmpb.main, @tagName(message_name));
-
-        pub const Response = Response: {
-            const request_suffix = "CsReq";
-            const response_suffix = "ScRsp";
-
-            const name = @tagName(message_name);
-
-            if (std.mem.endsWith(u8, name, request_suffix)) {
-                const response_name = name[0 .. name.len - request_suffix.len] ++ response_suffix;
-                if (@hasDecl(rmpb.main, response_name))
-                    break :Response @field(rmpb.main, response_name);
-            }
-
-            break :Response noreturn;
-        };
-
-        pub const cmd_id = rmpb.cmdId(Body);
-
-        /// The message that's received from client.
-        body: *const Body,
+        /// The incoming message.
+        message: *const Message,
         /// Message arrival timestamp, realtime.
         time: posix.timespec,
-        /// Pending notifies, as defined by `notifies`.
-        notifies: NotifiesStruct(notifies),
-        /// Pending response, as inferred from `message_name`.
-        response: ?Response,
         /// Global client variables.
         cvars: *ClientVariables,
         /// Originator client index.
         sender_index: u32,
-        /// Per-message arena allocator.
-        arena: Allocator,
+    };
+}
 
-        pub fn init(
-            arena: Allocator,
-            body: *const Body,
-            time: posix.timespec,
-            cvars: *ClientVariables,
-            sender_index: u32,
-        ) Txn {
+pub fn Output(
+    comptime Response: ?type,
+    // TODO: Get rid of notifies inside of each handler.
+    comptime notifies: anytype,
+) type {
+    return *struct {
+        const Out = @This();
+
+        /// Temporary allocator for populating the `Output` itself.
+        arena: Allocator,
+        /// The outgoing response.
+        response: if (Response) |R| ?R else void,
+        /// The outgoing notifies. TODO: remove this.
+        notifies: NotifiesStruct(notifies),
+
+        pub fn init(arena: Allocator) Out {
             return .{
-                .body = body,
-                .time = time,
-                .cvars = cvars,
                 .arena = arena,
-                .sender_index = sender_index,
-                .response = null,
+                .response = if (Response) |_| null else {},
                 .notifies = notifies: {
-                    var n: @FieldType(Txn, "notifies") = undefined;
+                    var n: @FieldType(Out, "notifies") = undefined;
                     inline for (@typeInfo(@TypeOf(n)).@"struct".fields) |struct_field|
                         @field(n, struct_field.name) = null;
 
@@ -207,18 +200,18 @@ pub fn Transaction(
             };
         }
 
-        pub inline fn respond(txn: *Txn, rsp: Response) void {
-            std.debug.assert(txn.response == null);
-            txn.response = rsp;
+        pub fn respond(out: *Out, response: Response.?) void {
+            std.debug.assert(out.response == null);
+            out.response = response;
         }
 
-        pub inline fn notify(
-            txn: *Txn,
+        pub fn notify(
+            out: *Out,
             /// Field name from `notifies`.
             comptime name: @EnumLiteral(),
             message: @field(notifies, @tagName(name)),
         ) void {
-            const field_ptr = &@field(txn.notifies, @tagName(name));
+            const field_ptr = &@field(out.notifies, @tagName(name));
             std.debug.assert(field_ptr.* == null);
             field_ptr.* = message;
         }
