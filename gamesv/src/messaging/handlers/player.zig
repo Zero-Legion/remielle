@@ -1,9 +1,9 @@
-pub fn playerLogin(txn: handlers.Transaction(.PlayerLoginCsReq)) !void {
-    try txn.respond(.init);
+pub fn playerLogin(txn: *handlers.Transaction(.PlayerLoginCsReq, .{})) !void {
+    txn.respond(.init);
 }
 
-pub fn getSelfBasicInfo(txn: handlers.Transaction(.GetSelfBasicInfoCsReq)) !void {
-    try txn.respond(.{ .self_basic_info = .{
+pub fn getSelfBasicInfo(txn: *handlers.Transaction(.GetSelfBasicInfoCsReq, .{})) !void {
+    txn.respond(.{ .self_basic_info = .{
         .level = 60,
         .nick_name = "xeondev",
         .name_change_times = 1,

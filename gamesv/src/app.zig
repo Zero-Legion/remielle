@@ -224,12 +224,11 @@ fn notifyPlayerKick(
 ) !void {
     const notify: rmpb.main.PlayerKickScNotify = .{ .reason = reason };
 
-    try messaging.sendMessage(
+    try messaging.send(
         &server.multi_conversation,
-        &server.cvars.xorpads[index],
+        &server.cvars,
         index,
-        .{ .packet_id = server.cvars.packet_id_counters[index] },
-        rmpb.cmdId(rmpb.main.PlayerKickScNotify).?,
+        .notify,
         notify,
     );
 

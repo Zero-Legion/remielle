@@ -1,31 +1,36 @@
-pub fn getServerTimestamp(txn: handlers.Transaction(.GetServerTimestampCsReq)) !void {
-    try txn.respond(.{
+pub fn getServerTimestamp(txn: *handlers.Transaction(.GetServerTimestampCsReq, .{})) !void {
+    txn.respond(.{
         .timestamp = @intCast(posix.timespecToMs(txn.time)),
     });
 }
 
-pub fn getMiscData(txn: handlers.Transaction(.GetMiscDataCsReq)) !void {
-    var unlocked_list_buf: [templates.unlock_config.entries.len]i32 = undefined;
-    var unlocked_list: std.ArrayList(i32) = .initBuffer(&unlocked_list_buf);
+pub fn getMiscData(txn: *handlers.Transaction(.GetMiscDataCsReq, .{})) !void {
+    var unlocked_list: std.ArrayList(i32) = try .initCapacity(
+        txn.arena,
+        templates.unlock_config.entries.len,
+    );
+
+    var post_girls: std.ArrayList(pb.PostGirlItem) = try .initCapacity(
+        txn.arena,
+        templates.post_girl_config.entries.len,
+    );
 
     for (templates.unlock_config.entries) |config|
         unlocked_list.appendAssumeCapacity(@intCast(config.id));
 
-    var post_girls_buf: [templates.post_girl_config.entries.len]pb.PostGirlItem = undefined;
-    var post_girls: std.ArrayList(pb.PostGirlItem) = .initBuffer(&post_girls_buf);
-
     for (templates.post_girl_config.entries) |config|
         post_girls.appendAssumeCapacity(.{ .id = config.id });
 
-    var show_post_girls: [1]u32 = .{
+    var show_post_girls: std.ArrayList(u32) = try .initCapacity(txn.arena, 1);
+    show_post_girls.appendAssumeCapacity(
         @intFromEnum(templates.post_girl_config.Id.Avatar_Female_Size03_Promeia),
-    };
+    );
 
-    try txn.respond(.{ .data = .{
+    txn.respond(.{ .data = .{
         .unlock = .{ .unlocked_list = unlocked_list },
         .post_girl = .{
             .post_girl_item_list = post_girls,
-            .show_post_girl_id_list = .fromOwnedSlice(&show_post_girls),
+            .show_post_girl_id_list = show_post_girls,
         },
         .business_card = .init,
         .player_accessory = .{

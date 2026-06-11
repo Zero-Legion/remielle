@@ -15,10 +15,11 @@ const CmdId = CmdId: {
 
     for (namespaces) |ns| for (@typeInfo(ns).@"struct".decls) |decl| {
         const fn_info = @typeInfo(@TypeOf(@field(ns, decl.name))).@"fn";
-        const R = fn_info.params[0].type.?;
+        const TxnPtr = fn_info.params[0].type.?;
+        const Txn = @typeInfo(TxnPtr).pointer.child;
 
-        values = values ++ .{R.cmd_id orelse continue};
-        names = names ++ .{R.Body.pb_desc_name};
+        values = values ++ .{Txn.cmd_id orelse continue};
+        names = names ++ .{Txn.Body.pb_desc_name};
     };
 
     break :CmdId @Enum(u16, .exhaustive, names, @ptrCast(values));
@@ -26,7 +27,7 @@ const CmdId = CmdId: {
 
 pub const ProcessError = error{
     DecodeFail,
-} || Allocator.Error || messaging.SendMessageError;
+} || Allocator.Error || messaging.SendError;
 
 pub fn process(
     arena: Allocator,
@@ -58,7 +59,7 @@ pub fn process(
 
         if (head.packet_id == 0) return;
 
-        try sendDummy(multi_conversation, cvars, client, head.packet_id);
+        try messaging.sendDummy(multi_conversation, cvars, client, .ack(head.packet_id));
         return;
     };
 
@@ -66,12 +67,14 @@ pub fn process(
         inline else => |id| lookup: inline for (namespaces) |ns| {
             inline for (@typeInfo(ns).@"struct".decls) |decl| {
                 const fn_info = @typeInfo(@TypeOf(@field(ns, decl.name))).@"fn";
-                const R = fn_info.params[0].type.?;
-                if (@intFromEnum(id) != R.cmd_id) continue;
+                const TxnPtr = fn_info.params[0].type.?;
+                const Txn = @typeInfo(TxnPtr).pointer.child;
+
+                if (@intFromEnum(id) != Txn.cmd_id) continue;
 
                 const body = rmpb.decode(
                     .main,
-                    R.Body,
+                    Txn.Body,
                     arena,
                     &xored_reader.interface,
                 ) catch |err| switch (err) {
@@ -79,21 +82,40 @@ pub fn process(
                     else => return error.DecodeFail,
                 };
 
-                const request: R = .{
-                    .body = &body,
-                    .multi_conversation = multi_conversation,
-                    .cvars = cvars,
-                    .time = time,
-                    .client_index = client,
-                    .packet_id = head.packet_id,
-                };
+                var txn: Txn = .init(arena, &body, time, cvars, client);
 
-                @field(ns, decl.name)(request) catch |err| switch (@as(ProcessError, err)) {
+                @field(ns, decl.name)(&txn) catch |err| switch (@as(ProcessError, err)) {
                     else => |e| return e,
                 };
 
+                inline for (@typeInfo(@FieldType(Txn, "notifies")).@"struct".fields) |struct_field| {
+                    if (@field(txn.notifies, struct_field.name)) |notify| {
+                        try messaging.send(multi_conversation, cvars, client, .notify, notify);
+
+                        log.debug(
+                            Txn.log_prefix ++ "sent notify of type " ++ @TypeOf(notify).pb_desc_name ++ " to {f}",
+                            .{cvars.addrs[client]},
+                        );
+                    }
+                }
+
+                if (Txn.Response != noreturn) {
+                    if (txn.response) |response| {
+                        if (rmpb.cmdId(Txn.Response) != null) {
+                            try messaging.send(multi_conversation, cvars, client, .ack(head.packet_id), response);
+                        } else {
+                            try messaging.sendDummy(multi_conversation, cvars, client, .ack(head.packet_id));
+
+                            log.debug(
+                                Txn.log_prefix ++ "response is not described; sent dummy to {f}",
+                                .{cvars.addrs[client]},
+                            );
+                        }
+                    }
+                }
+
                 log.debug(
-                    "processed message of type " ++ @typeName(R.Body) ++ " from {f}",
+                    "processed message of type " ++ @typeName(Txn.Body) ++ " from {f}",
                     .{cvars.addrs[client]},
                 );
 
@@ -103,9 +125,29 @@ pub fn process(
     }
 }
 
-pub fn Transaction(comptime message_name: @EnumLiteral()) type {
+fn NotifiesStruct(comptime definition_struct: anytype) type {
+    const Struct = @TypeOf(definition_struct);
+    const struct_fields = @typeInfo(Struct).@"struct".fields;
+
+    var field_names: [struct_fields.len][]const u8 = undefined;
+    var field_types: [struct_fields.len]type = undefined;
+
+    inline for (struct_fields, &field_names, &field_types) |struct_field, *field_name, *field_type| {
+        field_name.* = struct_field.name;
+        field_type.* = ?@field(definition_struct, struct_field.name);
+    }
+
+    return @Struct(.auto, null, &field_names, &field_types, &@splat(.{}));
+}
+
+pub fn Transaction(
+    comptime message_name: @EnumLiteral(),
+    comptime notifies: anytype,
+) type {
     return struct {
         const Txn = @This();
+
+        pub const log_prefix = "[" ++ @tagName(message_name) ++ "] ";
 
         pub const Body = @field(rmpb.main, @tagName(message_name));
 
@@ -126,79 +168,61 @@ pub fn Transaction(comptime message_name: @EnumLiteral()) type {
 
         pub const cmd_id = rmpb.cmdId(Body);
 
+        /// The message that's received from client.
         body: *const Body,
-        multi_conversation: *kcp.MultiConversation,
-        cvars: *ClientVariables,
+        /// Message arrival timestamp, realtime.
         time: posix.timespec,
-        client_index: u32,
-        packet_id: u32,
+        /// Pending notifies, as defined by `notifies`.
+        notifies: NotifiesStruct(notifies),
+        /// Pending response, as inferred from `message_name`.
+        response: ?Response,
+        /// Global client variables.
+        cvars: *ClientVariables,
+        /// Originator client index.
+        sender_index: u32,
+        /// Per-message arena allocator.
+        arena: Allocator,
 
-        pub fn respond(
-            txn: *const Txn,
-            rsp: Response,
-        ) messaging.SendMessageError!void {
-            const id = (comptime rmpb.cmdId(Response)) orelse {
-                try sendDummy(txn.multi_conversation, txn.cvars, txn.client_index, txn.packet_id);
-                log.debug(
-                    "response of type " ++ @typeName(Response) ++ " is not described; sent dummy to {f}",
-                    .{txn.cvars.addrs[txn.client_index]},
-                );
-                return;
+        pub fn init(
+            arena: Allocator,
+            body: *const Body,
+            time: posix.timespec,
+            cvars: *ClientVariables,
+            sender_index: u32,
+        ) Txn {
+            return .{
+                .body = body,
+                .time = time,
+                .cvars = cvars,
+                .arena = arena,
+                .sender_index = sender_index,
+                .response = null,
+                .notifies = notifies: {
+                    var n: @FieldType(Txn, "notifies") = undefined;
+                    inline for (@typeInfo(@TypeOf(n)).@"struct".fields) |struct_field|
+                        @field(n, struct_field.name) = null;
+
+                    break :notifies n;
+                },
             };
-
-            defer txn.cvars.packet_id_counters[txn.client_index] += 1;
-
-            try messaging.sendMessage(txn.multi_conversation, &txn.cvars.xorpads[txn.client_index], txn.client_index, .{
-                .packet_id = txn.cvars.packet_id_counters[txn.client_index],
-                .ack_packet_id = txn.packet_id,
-            }, id, rsp);
-
-            log.debug(
-                "sent response of type " ++ @typeName(Response) ++ " to {f}",
-                .{txn.cvars.addrs[txn.client_index]},
-            );
         }
 
-        pub fn notify(
-            txn: *const Txn,
-            comptime ntf_name: @EnumLiteral(),
-            ntf: @field(rmpb.main, @tagName(ntf_name)),
-        ) messaging.SendMessageError!void {
-            const id = (comptime rmpb.cmdId(@TypeOf(ntf))) orelse {
-                log.debug("notify of type " ++ @typeName(Response) ++ " is not described", .{});
-                return;
-            };
+        pub inline fn respond(txn: *Txn, rsp: Response) void {
+            std.debug.assert(txn.response == null);
+            txn.response = rsp;
+        }
 
-            defer txn.cvars.packet_id_counters[txn.client_index] += 1;
-            try messaging.sendMessage(txn.multi_conversation, &txn.cvars.xorpads[txn.client_index], txn.client_index, .{
-                .packet_id = txn.cvars.packet_id_counters[txn.client_index],
-            }, id, ntf);
-
-            log.debug(
-                "sent notify of type " ++ @typeName(@TypeOf(ntf)) ++ " to {f}",
-                .{txn.cvars.addrs[txn.client_index]},
-            );
+        pub inline fn notify(
+            txn: *Txn,
+            /// Field name from `notifies`.
+            comptime name: @EnumLiteral(),
+            message: @field(notifies, @tagName(name)),
+        ) void {
+            const field_ptr = &@field(txn.notifies, @tagName(name));
+            std.debug.assert(field_ptr.* == null);
+            field_ptr.* = message;
         }
     };
-}
-
-fn sendDummy(multi_conversation: *kcp.MultiConversation, cvars: *ClientVariables, client: u32, packet_id: u32) !void {
-    const DummyCmd = comptime DummyCmd: {
-        const ns = rmpb.Descriptors.main.namespace();
-        const name = @import("config").dummy_cmd;
-        if (!@hasDecl(ns, name))
-            @compileError("the `dummy_cmd` is invalid");
-
-        break :DummyCmd @field(ns, name);
-    };
-
-    const dummy: DummyCmd = .{};
-    defer cvars.packet_id_counters[client] += 1;
-
-    try messaging.sendMessage(multi_conversation, &cvars.xorpads[client], client, .{
-        .packet_id = cvars.packet_id_counters[client],
-        .ack_packet_id = packet_id,
-    }, DummyCmd.cmd_id, dummy);
 }
 
 const Io = std.Io;

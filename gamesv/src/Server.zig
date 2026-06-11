@@ -175,7 +175,7 @@ fn initAt(
 ) void {
     server.output.addUnchecked(index);
 
-    server.cvars.packet_id_counters[index] = 1;
+    server.cvars.packet_counters[index] = .init;
     server.cvars.addrs[index] = addr;
     server.cvars.xorpads[index].fillSeeded(key);
 }
@@ -194,14 +194,24 @@ fn release(server: *Server, id: kcp.ConvId) bool {
 // a more or less sane structure will arise
 // on its own when we'll start to track more state.
 pub const ClientVariables = struct {
-    packet_id_counters: []u32,
+    packet_counters: []PacketCounter,
     xorpads: []messaging.Xorpad,
     addrs: []posix.Sockaddr,
 
     fn initAlloc(uninit: *ClientVariables, arena: Allocator, slots: usize) Allocator.Error!void {
-        uninit.packet_id_counters = try arena.alloc(u32, slots);
+        uninit.packet_counters = try arena.alloc(PacketCounter, slots);
         uninit.xorpads = try arena.alloc(messaging.Xorpad, slots);
         uninit.addrs = try arena.alloc(posix.Sockaddr, slots);
+    }
+};
+
+pub const PacketCounter = enum(u32) {
+    init = 1,
+    _,
+
+    pub fn nextId(counter: *PacketCounter) u32 {
+        defer counter.* = @enumFromInt(1 +% @intFromEnum(counter.*));
+        return @intFromEnum(counter.*);
     }
 };
 

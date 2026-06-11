@@ -87,35 +87,71 @@ pub fn expectFirstPacket(
         return error.MalformedPayload;
 }
 
-pub const SendMessageError = error{MessageOversize};
+pub const SendError = error{MessageOversize};
 
-pub fn sendMessage(
+pub const Ack = enum(u32) {
+    notify = 0,
+    _,
+
+    pub fn ack(id: u32) Ack {
+        return @enumFromInt(id);
+    }
+};
+
+pub fn send(
     multi_conversation: *kcp.MultiConversation,
-    xorpad: *const Xorpad,
-    client: u32,
-    head: rmpb.stable.PacketHead,
-    cmd_id: u16,
+    cvars: *ClientVariables,
+    destination_index: u32,
+    ack: Ack,
     message: anytype,
-) SendMessageError!void {
+) SendError!void {
+    const cmd_id = (comptime rmpb.cmdId(@TypeOf(message))) orelse return;
+
+    const head: rmpb.stable.PacketHead = .{
+        .packet_id = cvars.packet_counters[destination_index].nextId(),
+        .ack_packet_id = @intFromEnum(ack),
+    };
+
     const length = encodingLength(head, message);
-    var writer = try multi_conversation.writer(client, length);
+    var writer = try multi_conversation.writer(destination_index, length);
 
     encode(
         &writer.interface,
-        xorpad,
+        &cvars.xorpads[destination_index],
         cmd_id,
         head,
         message,
     ) catch unreachable;
 }
 
+pub fn sendDummy(
+    multi_conversation: *kcp.MultiConversation,
+    cvars: *ClientVariables,
+    destination_index: u32,
+    ack: Ack,
+) SendError!void {
+    const DummyCmd = comptime DummyCmd: {
+        const ns = rmpb.Descriptors.main.namespace();
+        const name = @import("config").dummy_cmd;
+        if (!@hasDecl(ns, name))
+            @compileError("the `dummy_cmd` is invalid");
+
+        break :DummyCmd @field(ns, name);
+    };
+
+    const dummy: DummyCmd = .{};
+    return send(multi_conversation, cvars, destination_index, ack, dummy);
+}
+
 const readInt = std.mem.readInt;
 
 const Io = std.Io;
+const ClientVariables = Server.ClientVariables;
 
 const heap = std.heap;
 
 const kcp = @import("kcp.zig");
+const Server = @import("Server.zig");
 
 const rmcrypt = @import("rmcrypt");
 const rmpb = @import("rmpb");
