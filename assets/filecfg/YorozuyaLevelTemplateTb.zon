@@ -1,0 +1,302 @@
+.{
+    .{
+        .level = 1,
+        .experience = 245,
+        .reward_id = 101020001,
+    },
+    .{
+        .level = 2,
+        .experience = 270,
+        .reward_id = 101020002,
+    },
+    .{
+        .level = 3,
+        .experience = 295,
+        .reward_id = 101020003,
+    },
+    .{
+        .level = 4,
+        .experience = 325,
+        .reward_id = 101020004,
+    },
+    .{
+        .level = 5,
+        .experience = 355,
+        .reward_id = 101020005,
+    },
+    .{
+        .level = 6,
+        .experience = 385,
+        .reward_id = 101020006,
+    },
+    .{
+        .level = 7,
+        .experience = 415,
+        .reward_id = 101020007,
+    },
+    .{
+        .level = 8,
+        .experience = 450,
+        .reward_id = 101020008,
+    },
+    .{
+        .level = 9,
+        .experience = 485,
+        .reward_id = 101020009,
+    },
+    .{
+        .level = 10,
+        .experience = 520,
+        .reward_id = 101020010,
+    },
+    .{
+        .level = 11,
+        .experience = 555,
+        .reward_id = 101020011,
+    },
+    .{
+        .level = 12,
+        .experience = 595,
+        .reward_id = 101020012,
+    },
+    .{
+        .level = 13,
+        .experience = 635,
+        .reward_id = 101020013,
+    },
+    .{
+        .level = 14,
+        .experience = 675,
+        .reward_id = 101020014,
+    },
+    .{
+        .level = 15,
+        .experience = 715,
+        .reward_id = 101020015,
+    },
+    .{
+        .level = 16,
+        .experience = 765,
+        .reward_id = 101020016,
+    },
+    .{
+        .level = 17,
+        .experience = 815,
+        .reward_id = 101020017,
+    },
+    .{
+        .level = 18,
+        .experience = 865,
+        .reward_id = 101020018,
+    },
+    .{
+        .level = 19,
+        .experience = 915,
+        .reward_id = 101020019,
+    },
+    .{
+        .level = 20,
+        .experience = 1625,
+        .reward_id = 101020020,
+    },
+    .{
+        .level = 21,
+        .experience = 1945,
+        .reward_id = 101020021,
+    },
+    .{
+        .level = 22,
+        .experience = 2270,
+        .reward_id = 101020022,
+    },
+    .{
+        .level = 23,
+        .experience = 2590,
+        .reward_id = 101020023,
+    },
+    .{
+        .level = 24,
+        .experience = 2915,
+        .reward_id = 101020024,
+    },
+    .{
+        .level = 25,
+        .experience = 3235,
+        .reward_id = 101020025,
+    },
+    .{
+        .level = 26,
+        .experience = 3560,
+        .reward_id = 101020026,
+    },
+    .{
+        .level = 27,
+        .experience = 3880,
+        .reward_id = 101020027,
+    },
+    .{
+        .level = 28,
+        .experience = 4205,
+        .reward_id = 101020028,
+    },
+    .{
+        .level = 29,
+        .experience = 4525,
+        .reward_id = 101020029,
+    },
+    .{
+        .level = 30,
+        .experience = 4850,
+        .reward_id = 101020030,
+    },
+    .{
+        .level = 31,
+        .experience = 5170,
+        .reward_id = 101020031,
+    },
+    .{
+        .level = 32,
+        .experience = 5495,
+        .reward_id = 101020032,
+    },
+    .{
+        .level = 33,
+        .experience = 5815,
+        .reward_id = 101020033,
+    },
+    .{
+        .level = 34,
+        .experience = 6140,
+        .reward_id = 101020034,
+    },
+    .{
+        .level = 35,
+        .experience = 6460,
+        .reward_id = 101020035,
+    },
+    .{
+        .level = 36,
+        .experience = 6785,
+        .reward_id = 101020036,
+    },
+    .{
+        .level = 37,
+        .experience = 7105,
+        .reward_id = 101020037,
+    },
+    .{
+        .level = 38,
+        .experience = 7430,
+        .reward_id = 101020038,
+    },
+    .{
+        .level = 39,
+        .experience = 7750,
+        .reward_id = 101020039,
+    },
+    .{
+        .level = 40,
+        .experience = 8115,
+        .reward_id = 101020040,
+    },
+    .{
+        .level = 41,
+        .experience = 8475,
+        .reward_id = 101020041,
+    },
+    .{
+        .level = 42,
+        .experience = 8835,
+        .reward_id = 101020042,
+    },
+    .{
+        .level = 43,
+        .experience = 9195,
+        .reward_id = 101020043,
+    },
+    .{
+        .level = 44,
+        .experience = 9555,
+        .reward_id = 101020044,
+    },
+    .{
+        .level = 45,
+        .experience = 9920,
+        .reward_id = 101020045,
+    },
+    .{
+        .level = 46,
+        .experience = 10280,
+        .reward_id = 101020046,
+    },
+    .{
+        .level = 47,
+        .experience = 10640,
+        .reward_id = 101020047,
+    },
+    .{
+        .level = 48,
+        .experience = 11000,
+        .reward_id = 101020048,
+    },
+    .{
+        .level = 49,
+        .experience = 11360,
+        .reward_id = 101020049,
+    },
+    .{
+        .level = 50,
+        .experience = 35000,
+        .reward_id = 101020050,
+    },
+    .{
+        .level = 51,
+        .experience = 48265,
+        .reward_id = 101020051,
+    },
+    .{
+        .level = 52,
+        .experience = 61525,
+        .reward_id = 101020052,
+    },
+    .{
+        .level = 53,
+        .experience = 74790,
+        .reward_id = 101020053,
+    },
+    .{
+        .level = 54,
+        .experience = 88050,
+        .reward_id = 101020054,
+    },
+    .{
+        .level = 55,
+        .experience = 150000,
+        .reward_id = 101020055,
+    },
+    .{
+        .level = 56,
+        .experience = 181580,
+        .reward_id = 101020056,
+    },
+    .{
+        .level = 57,
+        .experience = 213165,
+        .reward_id = 101020057,
+    },
+    .{
+        .level = 58,
+        .experience = 244745,
+        .reward_id = 101020058,
+    },
+    .{
+        .level = 59,
+        .experience = 276325,
+        .reward_id = 101020059,
+    },
+    .{
+        .level = 60,
+        .experience = 0,
+        .reward_id = 101020060,
+    },
+}

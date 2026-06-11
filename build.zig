@@ -138,6 +138,7 @@ const gamesv_assets: []const StaticAsset = &.{
     .asset("UnlockConfigTemplateTb", "assets/filecfg/UnlockConfigTemplateTb.zon"),
     .asset("PostGirlConfigTemplateTb", "assets/filecfg/PostGirlConfigTemplateTb.zon"),
     .asset("SectionConfigTemplateTb", "assets/filecfg/SectionConfigTemplateTb.zon"),
+    .asset("YorozuyaLevelTemplateTb", "assets/filecfg/YorozuyaLevelTemplateTb.zon"),
 };
 
 const dpsv_assets: []const StaticAsset = &.{
