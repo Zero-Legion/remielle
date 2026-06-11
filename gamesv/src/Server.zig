@@ -15,6 +15,10 @@ pub const Frame = struct {
     time: posix.timespec,
     cvars: *ClientVariables,
     multi_conversation: *kcp.MultiConversation,
+
+    pub inline fn player(frame: *const Frame) logic.Properties.Player {
+        return @enumFromInt(frame.target_index);
+    }
 };
 
 pub fn initAlloc(
@@ -189,6 +193,8 @@ fn initAt(
     server.cvars.packet_counters[index] = .init;
     server.cvars.addrs[index] = addr;
     server.cvars.xorpads[index].fillSeeded(key);
+
+    server.cvars.properties.setDefaultsAt(@enumFromInt(index));
 }
 
 fn release(server: *Server, id: kcp.ConvId) bool {
@@ -208,11 +214,13 @@ pub const ClientVariables = struct {
     packet_counters: []PacketCounter,
     xorpads: []messaging.Xorpad,
     addrs: []posix.Sockaddr,
+    properties: logic.Properties,
 
     fn initAlloc(uninit: *ClientVariables, arena: Allocator, slots: usize) Allocator.Error!void {
         uninit.packet_counters = try arena.alloc(PacketCounter, slots);
         uninit.xorpads = try arena.alloc(messaging.Xorpad, slots);
         uninit.addrs = try arena.alloc(posix.Sockaddr, slots);
+        try uninit.properties.initAlloc(arena, slots);
     }
 };
 
@@ -290,6 +298,7 @@ const posix = rmio.posix;
 const array_hash_map = std.array_hash_map;
 
 const kcp = @import("kcp.zig");
+const logic = @import("logic.zig");
 const messaging = @import("messaging.zig");
 
 const rmio = @import("rmio");
