@@ -1,15 +1,15 @@
 pub fn getServerTimestamp(
     input: handlers.Input(pb.GetServerTimestampCsReq),
-    output: handlers.Output(pb.GetServerTimestampScRsp, .{}),
+    output: handlers.Output(pb.GetServerTimestampScRsp),
 ) !void {
     output.respond(.{
-        .timestamp = @intCast(posix.timespecToMs(input.time)),
+        .timestamp = @intCast(posix.timespecToMs(input.frame.time)),
     });
 }
 
 pub fn getMiscData(
     input: handlers.Input(pb.GetMiscDataCsReq),
-    output: handlers.Output(pb.GetMiscDataScRsp, .{}),
+    output: handlers.Output(pb.GetMiscDataScRsp),
 ) !void {
     _ = input;
 

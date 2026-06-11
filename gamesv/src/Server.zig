@@ -10,6 +10,13 @@ conv_map: array_hash_map.Auto(kcp.ConvId, u32),
 conv_random: u64,
 per_message_arena: *heap.ArenaAllocator,
 
+pub const Frame = struct {
+    target_index: u32,
+    time: posix.timespec,
+    cvars: *ClientVariables,
+    multi_conversation: *kcp.MultiConversation,
+};
+
 pub fn initAlloc(
     uninit: *Server,
     /// Used for persistent server state allocations.
@@ -145,6 +152,13 @@ pub fn receiveKcpPacket(
     server.multi_conversation.fillAt(client, buffer) catch
         return error.FillFailed;
 
+    const frame: Frame = .{
+        .target_index = client,
+        .time = time,
+        .cvars = &server.cvars,
+        .multi_conversation = &server.multi_conversation,
+    };
+
     while (true) {
         var reader = server.multi_conversation.reader(client) orelse break;
         defer server.multi_conversation.discardAt(client);
@@ -152,11 +166,8 @@ pub fn receiveKcpPacket(
 
         messaging.handlers.process(
             server.per_message_arena.allocator(),
-            &server.multi_conversation,
-            &server.cvars,
-            time,
+            &frame,
             &reader.interface,
-            client,
         ) catch |err| {
             log.err("failed to process message: {t}", .{err});
             break;

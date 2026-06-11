@@ -1,6 +1,6 @@
 pub fn playerLogin(
     input: handlers.Input(pb.PlayerLoginCsReq),
-    output: handlers.Output(pb.PlayerLoginScRsp, .{}),
+    output: handlers.Output(pb.PlayerLoginScRsp),
 ) !void {
     _ = input;
     output.respond(.init);
@@ -8,7 +8,7 @@ pub fn playerLogin(
 
 pub fn getSelfBasicInfo(
     input: handlers.Input(pb.GetSelfBasicInfoCsReq),
-    output: handlers.Output(pb.GetSelfBasicInfoScRsp, .{}),
+    output: handlers.Output(pb.GetSelfBasicInfoScRsp),
 ) !void {
     _ = input;
     output.respond(.{ .self_basic_info = .{

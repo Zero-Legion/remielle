@@ -1,6 +1,6 @@
 pub fn getAvatarData(
     input: handlers.Input(pb.GetAvatarDataCsReq),
-    output: handlers.Output(pb.GetAvatarDataScRsp, .{}),
+    output: handlers.Output(pb.GetAvatarDataScRsp),
 ) !void {
     _ = input;
 

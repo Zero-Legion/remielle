@@ -27,15 +27,12 @@ const CmdId = CmdId: {
 
 pub const ProcessError = error{
     DecodeFail,
-} || Allocator.Error || messaging.SendError;
+} || Allocator.Error || messaging.SendError || messaging.notifiers.Error;
 
 pub fn process(
     arena: Allocator,
-    multi_conversation: *kcp.MultiConversation,
-    cvars: *ClientVariables,
-    time: posix.timespec,
+    frame: *const Server.Frame,
     reader: *Io.Reader,
-    client: u32,
 ) ProcessError!void {
     const msg_header_bytes = reader.takeArray(messaging.Header.size) catch
         return error.DecodeFail;
@@ -49,17 +46,22 @@ pub fn process(
     const head = messaging.decodePacketHead(head_bytes) orelse
         return error.DecodeFail;
 
-    var xored_reader = cvars.xorpads[client].wrapReader(reader, msg_header.body_len);
+    var xored_reader = frame.cvars.xorpads[frame.target_index].wrapReader(reader, msg_header.body_len);
 
     const cmd_id = std.enums.fromInt(CmdId, msg_header.cmd_id) orelse {
         log.warn(
             "unhandled message with cmd_id {d} from {f}",
-            .{ msg_header.cmd_id, cvars.addrs[client] },
+            .{ msg_header.cmd_id, frame.cvars.addrs[frame.target_index] },
         );
 
         if (head.packet_id == 0) return;
 
-        try messaging.sendDummy(multi_conversation, cvars, client, .ack(head.packet_id));
+        try messaging.sendDummy(
+            frame.multi_conversation,
+            frame.cvars,
+            frame.target_index,
+            .ack(head.packet_id),
+        );
         return;
     };
 
@@ -76,7 +78,7 @@ pub fn process(
 
                 if (@intFromEnum(id) != rmpb.cmdId(In.Message)) continue;
 
-                const message = rmpb.decode(
+                const in_message = rmpb.decode(
                     .main,
                     In.Message,
                     arena,
@@ -87,10 +89,8 @@ pub fn process(
                 };
 
                 const input: In = .{
-                    .message = &message,
-                    .time = time,
-                    .cvars = cvars,
-                    .sender_index = client,
+                    .frame = frame,
+                    .message = &in_message,
                 };
 
                 var output: Out = .init(arena);
@@ -99,29 +99,20 @@ pub fn process(
                     else => |e| return e,
                 };
 
-                inline for (@typeInfo(@FieldType(Out, "notifies")).@"struct".fields) |struct_field| {
-                    if (@field(output.notifies, struct_field.name)) |notify| {
-                        try messaging.send(multi_conversation, cvars, client, .notify, notify);
+                try messaging.notifiers.notifyLogicChanges(arena, frame, &output.changes);
 
-                        log.debug(
-                            In.log_prefix ++ "sent notify of type " ++ @TypeOf(notify).pb_desc_name ++ " to {f}",
-                            .{cvars.addrs[client]},
-                        );
-                    }
-                }
+                const OutMessage = @FieldType(Out, "message");
 
-                const Response = @FieldType(Out, "response");
-
-                if (Response != void) {
-                    if (output.response) |response| {
-                        if (rmpb.cmdId(@typeInfo(Response).optional.child) != null) {
-                            try messaging.send(multi_conversation, cvars, client, .ack(head.packet_id), response);
+                if (OutMessage != void) {
+                    if (output.message) |out_message| {
+                        if (rmpb.cmdId(@typeInfo(OutMessage).optional.child) != null) {
+                            try messaging.send(frame.multi_conversation, frame.cvars, frame.target_index, .ack(head.packet_id), out_message);
                         } else {
-                            try messaging.sendDummy(multi_conversation, cvars, client, .ack(head.packet_id));
+                            try messaging.sendDummy(frame.multi_conversation, frame.cvars, frame.target_index, .ack(head.packet_id));
 
                             log.debug(
                                 In.log_prefix ++ "response is not described; sent dummy to {f}",
-                                .{cvars.addrs[client]},
+                                .{frame.cvars.addrs[frame.target_index]},
                             );
                         }
                     }
@@ -129,7 +120,7 @@ pub fn process(
 
                 log.debug(
                     "processed message of type " ++ In.Message.pb_desc_name ++ " from {f}",
-                    .{cvars.addrs[client]},
+                    .{frame.cvars.addrs[frame.target_index]},
                 );
 
                 break :lookup;
@@ -160,60 +151,35 @@ pub fn Input(InMessage: type) type {
         pub const Message = InMessage;
         pub const log_prefix = "[" ++ InMessage.pb_desc_name ++ "] ";
 
-        /// The incoming message.
+        frame: *const Server.Frame,
         message: *const Message,
-        /// Message arrival timestamp, realtime.
-        time: posix.timespec,
-        /// Global client variables.
-        cvars: *ClientVariables,
-        /// Originator client index.
-        sender_index: u32,
     };
 }
 
-pub fn Output(
-    comptime Response: ?type,
-    // TODO: Get rid of notifies inside of each handler.
-    comptime notifies: anytype,
-) type {
+pub fn Output(OutMessage: ?type) type {
     return *struct {
         const Out = @This();
 
+        pub const Message = OutMessage;
+
         /// Temporary allocator for populating the `Output` itself.
         arena: Allocator,
-        /// The outgoing response.
-        response: if (Response) |R| ?R else void,
-        /// The outgoing notifies. TODO: remove this.
-        notifies: NotifiesStruct(notifies),
+        /// The outgoing message.
+        message: if (OutMessage) |Msg| ?Msg else void,
+        /// Logic state modifications.
+        changes: logic.Changes,
 
         pub fn init(arena: Allocator) Out {
             return .{
                 .arena = arena,
-                .response = if (Response) |_| null else {},
-                .notifies = notifies: {
-                    var n: @FieldType(Out, "notifies") = undefined;
-                    inline for (@typeInfo(@TypeOf(n)).@"struct".fields) |struct_field|
-                        @field(n, struct_field.name) = null;
-
-                    break :notifies n;
-                },
+                .message = if (OutMessage) |_| null else {},
+                .changes = .init,
             };
         }
 
-        pub fn respond(out: *Out, response: Response.?) void {
-            std.debug.assert(out.response == null);
-            out.response = response;
-        }
-
-        pub fn notify(
-            out: *Out,
-            /// Field name from `notifies`.
-            comptime name: @EnumLiteral(),
-            message: @field(notifies, @tagName(name)),
-        ) void {
-            const field_ptr = &@field(out.notifies, @tagName(name));
-            std.debug.assert(field_ptr.* == null);
-            field_ptr.* = message;
+        pub fn respond(out: *Out, response: OutMessage.?) void {
+            std.debug.assert(out.message == null);
+            out.message = response;
         }
     };
 }
@@ -225,7 +191,9 @@ const ClientVariables = Server.ClientVariables;
 const posix = rmio.posix;
 
 const Server = @import("../Server.zig");
+
 const kcp = @import("../kcp.zig");
+const logic = @import("../logic.zig");
 const messaging = @import("../messaging.zig");
 
 const rmio = @import("rmio");

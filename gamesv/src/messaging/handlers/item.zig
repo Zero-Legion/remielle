@@ -1,6 +1,6 @@
 pub fn getWeaponData(
     input: handlers.Input(pb.GetWeaponDataCsReq),
-    output: handlers.Output(pb.GetWeaponDataScRsp, .{}),
+    output: handlers.Output(pb.GetWeaponDataScRsp),
 ) !void {
     _ = input;
     output.respond(.init);
@@ -8,7 +8,7 @@ pub fn getWeaponData(
 
 pub fn getEquipData(
     input: handlers.Input(pb.GetEquipDataCsReq),
-    output: handlers.Output(pb.GetEquipDataScRsp, .{}),
+    output: handlers.Output(pb.GetEquipDataScRsp),
 ) !void {
     _ = input;
     output.respond(.init);
@@ -16,7 +16,7 @@ pub fn getEquipData(
 
 pub fn getItemData(
     input: handlers.Input(pb.GetItemDataCsReq),
-    output: handlers.Output(pb.GetItemDataScRsp, .{}),
+    output: handlers.Output(pb.GetItemDataScRsp),
 ) !void {
     _ = input;
 
@@ -35,7 +35,7 @@ pub fn getItemData(
 
 pub fn getWishlistData(
     input: handlers.Input(pb.GetWishlistDataCsReq),
-    output: handlers.Output(pb.GetWishlistDataScRsp, .{}),
+    output: handlers.Output(pb.GetWishlistDataScRsp),
 ) !void {
     _ = input;
     output.respond(.init);
