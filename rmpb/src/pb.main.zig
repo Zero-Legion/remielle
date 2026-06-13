@@ -13883,6 +13883,12 @@ pub const AvatarFavoriteCsReq = struct {
     avatar_id: u32 = 0,
 };
 
+pub const AvatarFavoriteScRsp = struct {
+    pub const init: @This() = .{};
+    pub const pb_desc_name = "AvatarFavoriteScRsp";
+    retcode: i32 = 0,
+};
+
 pub const GMENDEILGAD = struct {
     pub const init: @This() = .{};
     pub const pb_desc_name = "GMENDEILGAD";
@@ -39879,4 +39885,3 @@ pub const MFPGBFGMCAC = struct {
     pub const pb_desc_name = "MFPGBFGMCAC";
     retcode: i32 = 0,
 };
-

@@ -99,7 +99,9 @@ pub fn process(
                     else => |e| return e,
                 };
 
-                try messaging.notifiers.notifyLogicChanges(arena, frame, &output.changes);
+                if (!output.failed) {
+                    try messaging.notifiers.notifyLogicChanges(arena, frame, &output.changes);
+                }
 
                 const OutMessage = @FieldType(Out, "message");
 
@@ -168,18 +170,27 @@ pub fn Output(OutMessage: ?type) type {
         message: if (OutMessage) |Msg| ?Msg else void,
         /// Logic state modifications.
         changes: logic.Changes,
+        /// If this is true, the rest of the pipeline won't be executed.
+        failed: bool,
 
         pub fn init(arena: Allocator) Out {
             return .{
                 .arena = arena,
                 .message = if (OutMessage) |_| null else {},
                 .changes = .init,
+                .failed = false,
             };
         }
 
         pub fn respond(out: *Out, response: OutMessage.?) void {
             std.debug.assert(out.message == null);
             out.message = response;
+        }
+
+        pub fn bail(out: *Out, response: OutMessage.?) void {
+            std.debug.assert(out.message == null);
+            out.message = response;
+            out.failed = true;
         }
     };
 }

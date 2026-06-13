@@ -60,15 +60,47 @@ pub fn getAvatarData(
     output.respond(.{ .avatar_list = infos });
 }
 
-const SkillType = enum(u32) {
-    common_attack = 0,
-    special_attack = 1,
-    evade = 2,
-    cooperate_skill = 3,
-    unique_skill = 4,
-    core_skill = 5,
-    assist_skill = 6,
-};
+pub fn avatarFavorite(
+    input: handlers.Input(pb.AvatarFavoriteCsReq),
+    output: handlers.Output(pb.AvatarFavoriteScRsp),
+) !void {
+    const avatar = &input.frame.cvars.properties.avatar[input.frame.target_index];
+
+    const maybe_index: ?u32 = avatar_index: {
+        const id = std.enums.fromInt(Properties.Avatar.Id, input.message.avatar_id) orelse
+            break :avatar_index null;
+
+        break :avatar_index avatar.indexes.get(id);
+    };
+
+    const index = maybe_index orelse
+        return output.bail(.{ .retcode = 1 });
+
+    var meta = avatar.metas[index];
+
+    if (meta.flags.favorite != input.message.is_favorite) {
+        meta.flags.favorite = input.message.is_favorite;
+
+        const changes = try output.arena.alloc(logic.Changes.Avatar, 1);
+
+        changes[0] = .{
+            .id = avatar.ids[index],
+            .level = meta.level,
+            .exp = meta.exp,
+            .rank = meta.rank,
+            .talents = meta.talents,
+            .talent_switch = meta.talent_switch,
+            .skill_levels = meta.skill_levels,
+            .flags = meta.flags,
+            .weapon_uid = avatar.weapon_uids[index],
+            .equipment_uids = avatar.equipment_uids[index],
+        };
+
+        output.changes.avatars = changes;
+    }
+
+    output.respond(.init);
+}
 
 const Avatar = Properties.Avatar;
 const ArrayList = std.ArrayList;
