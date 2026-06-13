@@ -69,15 +69,9 @@ pub fn Input(comptime InChange: type) type {
         pub const Change = InChange;
 
         frame: *const Server.Frame,
-        changes: if (Change == logic.Changes)
-            *const logic.Changes
-        else
-            []const Change,
+        changes: []const Change,
 
         pub fn init(frame: *const Server.Frame, logic_changes: *const logic.Changes) In {
-            if (Change == logic.Changes)
-                return .{ .frame = frame, .changes = logic_changes };
-
             const changes: []const Change = changes: inline for (
                 @typeInfo(logic.Changes).@"struct".fields,
             ) |struct_field| {
@@ -95,10 +89,7 @@ pub fn Input(comptime InChange: type) type {
         }
 
         fn anythingChanged(in: *const In) bool {
-            return if (Change == logic.Changes)
-                true
-            else
-                in.changes.len != 0;
+            return in.changes.len != 0;
         }
     };
 }
