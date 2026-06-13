@@ -2,16 +2,25 @@ pub fn getAvatarData(
     input: handlers.Input(pb.GetAvatarDataCsReq),
     output: handlers.Output(pb.GetAvatarDataScRsp),
 ) !void {
-    _ = input;
+    const avatar = &input.frame.cvars.properties.avatar[input.frame.target_index];
 
-    var avatars: std.ArrayList(pb.AvatarInfo) = try .initCapacity(
-        output.arena,
-        templates.avatar_base.entries.len,
+    const metas = avatar.meta();
+    const weapon_uids = avatar.weaponUids();
+    const equipment_uids = avatar.equipmentUids();
+
+    var infos: std.ArrayList(pb.AvatarInfo) = try .initCapacity(output.arena, metas.len);
+
+    const talent_switch_buf = try output.arena.alloc(
+        bool,
+        Properties.Avatar.TalentSwitch.count * metas.len,
     );
 
-    var talent_switch: std.ArrayList(bool) = try .initCapacity(output.arena, 6);
-    talent_switch.appendSliceAssumeCapacity(&(@as([3]bool, @splat(false)) ++ @as([3]bool, @splat(true))));
+    const dressed_equip_buf = try output.arena.alloc(
+        pb.DressedEquip,
+        Properties.Avatar.equipment_slots * equipment_uids.len,
+    );
 
+    // TODO
     const skill_types = comptime std.enums.values(SkillType);
     var avatar_skills: std.ArrayList(pb.AvatarSkillLevel) = try .initCapacity(output.arena, skill_types.len);
 
@@ -23,19 +32,35 @@ pub fn getAvatarData(
         },
     });
 
-    for (templates.avatar_base.entries) |entry| if (entry.camp != 0) {
-        avatars.appendAssumeCapacity(.{
-            .id = entry.id,
-            .skill_type_level = avatar_skills,
-            .is_favorite = entry.getId() == .velina,
-            .talent_switch_list = talent_switch,
-            .level = 60,
-            .rank = 6,
-            .unlocked_talent_num = 6,
-        });
-    };
+    for (metas, weapon_uids, equipment_uids, 0..) |meta, weapon_uid, equipment, index| {
+        const info = infos.addOneAssumeCapacity();
+        const talent_switch = talent_switch_buf[Properties.Avatar.TalentSwitch.count * index ..][0..Properties.Avatar.TalentSwitch.count];
 
-    output.respond(.{ .avatar_list = avatars });
+        talent_switch.* = meta.talent_switch.toBools();
+
+        info.* = .{
+            .id = @intFromEnum(avatar.ids[index]),
+            .level = meta.level.toInt(),
+            .rank = meta.rank.toInt(),
+            .unlocked_talent_num = meta.talents.toInt(),
+            .talent_switch_list = .fromOwnedSlice(talent_switch),
+            .skill_type_level = avatar_skills, // TODO
+            .cur_weapon_uid = weapon_uid.unwrap() orelse 0,
+            .dressed_equip_list = .initBuffer(
+                dressed_equip_buf[Properties.Avatar.equipment_slots * index ..][0..Properties.Avatar.equipment_slots],
+            ),
+            .is_favorite = meta.flags.favorite,
+        };
+
+        for (equipment, 1..) |maybe_uid, slot| if (maybe_uid.unwrap()) |uid| {
+            info.dressed_equip_list.appendAssumeCapacity(.{
+                .index = @intCast(slot),
+                .equip_uid = uid,
+            });
+        };
+    }
+
+    output.respond(.{ .avatar_list = infos });
 }
 
 const SkillType = enum(u32) {
@@ -48,8 +73,11 @@ const SkillType = enum(u32) {
     assist_skill = 6,
 };
 
+const ArrayList = std.ArrayList;
 const templates = Assets.templates;
+const Properties = logic.Properties;
 
+const logic = @import("../../logic.zig");
 const Assets = @import("../../Assets.zig");
 const handlers = @import("../handlers.zig");
 

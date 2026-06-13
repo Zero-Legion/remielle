@@ -1,13 +1,42 @@
+pub const Avatar = @import("Properties/Avatar.zig");
+
 basic_info: []BasicInfo,
+avatar: []Avatar,
 
 pub fn initAlloc(uninit: *Properties, arena: Allocator, slots: usize) Allocator.Error!void {
     uninit.basic_info = try arena.alloc(BasicInfo, slots);
+    uninit.avatar = try arena.alloc(Avatar, slots);
 }
 
 pub fn setDefaultsAt(props: *Properties, at: Player) void {
     const index = at.toInt();
 
     props.basic_info[index] = .init;
+    props.avatar[index] = .init;
+
+    props.unlockAllAvatars(at);
+}
+
+fn unlockAllAvatars(props: *Properties, at: Player) void {
+    const avatar = &props.avatar[at.toInt()];
+
+    for (templates.avatar_base.entries) |template| if (template.camp != 0) {
+        const i = avatar.indexes.count();
+        avatar.indexes.put(template.getId(), @intCast(i));
+        avatar.ids[i] = template.getId();
+
+        avatar.metas[i] = .{
+            .level = .max,
+            .exp = 0,
+            .rank = .max,
+            .talents = .max,
+            .talent_switch = .init,
+            .flags = .init,
+        };
+
+        avatar.weapon_uids[i] = .none;
+        avatar.equipment_uids[i] = @splat(.none);
+    };
 }
 
 /// Player index.

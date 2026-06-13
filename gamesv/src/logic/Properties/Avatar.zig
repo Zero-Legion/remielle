@@ -1,0 +1,125 @@
+const size = templates.avatar_base.entries.len;
+
+pub const equipment_slots: usize = 6;
+
+pub const Id = templates.avatar_base.Id;
+
+indexes: std.EnumMap(Id, u32),
+ids: [size]Id,
+metas: [size]Meta,
+weapon_uids: [size]OptionalUID,
+equipment_uids: [size][equipment_slots]OptionalUID,
+
+pub const init: Avatar = .{
+    .indexes = .init(.{}),
+    .ids = undefined,
+    .metas = undefined,
+    .weapon_uids = undefined,
+    .equipment_uids = undefined,
+};
+
+pub fn meta(a: *Avatar) []Meta {
+    return a.metas[0..a.indexes.count()];
+}
+
+pub fn weaponUids(a: *Avatar) []OptionalUID {
+    return a.weapon_uids[0..a.indexes.count()];
+}
+
+pub fn equipmentUids(a: *Avatar) [][equipment_slots]OptionalUID {
+    return a.equipment_uids[0..a.indexes.count()];
+}
+
+pub const Meta = struct {
+    level: Level,
+    exp: u32,
+    rank: Rank,
+    talents: Talents,
+    talent_switch: TalentSwitch,
+    flags: Flags,
+};
+
+pub const OptionalUID = enum(u32) {
+    none = 0,
+    _,
+
+    pub fn unwrap(ou: OptionalUID) ?u32 {
+        return switch (ou) {
+            .none => null,
+            _ => |uid| @intFromEnum(uid),
+        };
+    }
+};
+
+pub const Level = enum(u8) {
+    init = 1,
+    max = 60,
+    _,
+
+    pub fn toInt(level: Level) u8 {
+        return @intFromEnum(level);
+    }
+};
+
+pub const Rank = enum(u8) {
+    init = 1,
+    max = 6,
+    _,
+
+    pub fn toInt(rank: Rank) u8 {
+        return @intFromEnum(rank);
+    }
+};
+
+pub const Talents = enum(u8) {
+    init = 0,
+    max = 6,
+    _,
+
+    pub fn toInt(talents: Talents) u8 {
+        return @intFromEnum(talents);
+    }
+};
+
+pub const Flags = packed struct {
+    favorite: bool,
+
+    pub const init: Flags = .{
+        .favorite = false,
+    };
+};
+
+pub const TalentSwitch = enum(u6) {
+    pub const count: usize = 6;
+
+    init = 0b000000,
+    _,
+
+    pub fn fromBools(bools: *[count]bool) ?TalentSwitch {
+        var int: u6 = 0;
+        inline for (bools, 0..) |bit, index|
+            int |= @intFromBool(bit) << index;
+
+        if ((int & 0b111) & ((int >> 3) & 0b111) != 0)
+            return null;
+
+        return @enumFromInt(int);
+    }
+
+    pub fn toBools(ts: TalentSwitch) [count]bool {
+        const int = @intFromEnum(ts);
+        var bools: [count]bool = undefined;
+
+        inline for (&bools, 0..) |*bit, index|
+            bit.* = (int >> index) & 1 != 0;
+
+        return bools;
+    }
+};
+
+const templates = Assets.templates;
+
+const Assets = @import("../../Assets.zig");
+
+const std = @import("std");
+const Avatar = @This();
