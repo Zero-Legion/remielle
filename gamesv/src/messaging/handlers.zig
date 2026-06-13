@@ -100,6 +100,7 @@ pub fn process(
                 };
 
                 if (!output.failed) {
+                    try logic.mutators.dispatchLogicChanges(frame, &output.changes);
                     try messaging.notifiers.notifyLogicChanges(arena, frame, &output.changes);
                 }
 
