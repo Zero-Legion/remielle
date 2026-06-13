@@ -1,4 +1,5 @@
 const namespaces: []const type = &.{
+    @import("notifiers/player_sync.zig"),
     @import("notifiers/scene.zig"),
 };
 
