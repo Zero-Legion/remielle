@@ -11,8 +11,6 @@ pub fn getMiscData(
     input: handlers.Input(pb.GetMiscDataCsReq),
     output: handlers.Output(pb.GetMiscDataScRsp),
 ) !void {
-    _ = input;
-
     var unlocked_list: std.ArrayList(i32) = try .initCapacity(
         output.arena,
         templates.unlock_config.entries.len,
@@ -34,6 +32,8 @@ pub fn getMiscData(
         @intFromEnum(templates.post_girl_config.Id.Avatar_Female_Size03_Promeia),
     );
 
+    const basic_info = &input.frame.cvars.properties.basic_info[input.frame.target_index];
+
     output.respond(.{ .data = .{
         .unlock = .{ .unlocked_list = unlocked_list },
         .post_girl = .{
@@ -42,7 +42,7 @@ pub fn getMiscData(
         },
         .business_card = .init,
         .player_accessory = .{
-            .control_guise_avatar_id = @intFromEnum(templates.avatar_base.Id.velina),
+            .control_guise_avatar_id = basic_info.control_guise_avatar.toInt(),
         },
     } });
 }
