@@ -35,25 +35,25 @@ fn buildAvatarSync(arena: Allocator, changes: []const logic.Changes.Avatar) !?pb
         const info = sync.avatar_list.addOneAssumeCapacity();
 
         const talent_switch = talent_switch_buf[Avatar.TalentSwitch.count * index ..][0..Avatar.TalentSwitch.count];
-        talent_switch.* = change.talent_switch.toBools();
+        talent_switch.* = change.meta.talent_switch.toBools();
 
         const avatar_skills = avatar_skills_buf[Avatar.Skill.count * index ..][0..Avatar.Skill.count];
-        for (avatar_skills, change.skill_levels, 0..) |*avatar_skill, level, skill_type|
+        for (avatar_skills, change.meta.skill_levels, 0..) |*avatar_skill, level, skill_type|
             avatar_skill.* = .{ .skill_type = @intCast(skill_type), .level = level.toInt() };
 
         info.* = .{
             .id = @intFromEnum(change.id),
-            .level = change.level.toInt(),
-            .rank = change.rank.toInt(),
-            .unlocked_talent_num = change.talents.toInt(),
+            .level = change.meta.level.toInt(),
+            .rank = change.meta.rank.toInt(),
+            .unlocked_talent_num = change.meta.talents.toInt(),
             .talent_switch_list = .fromOwnedSlice(talent_switch),
             .skill_type_level = .fromOwnedSlice(avatar_skills),
-            .passive_skill_level = change.skill_levels[Avatar.Skill.core_skill.toInt()].toInt() - 1,
+            .passive_skill_level = change.meta.skill_levels[Avatar.Skill.core_skill.toInt()].toInt() - 1,
             .cur_weapon_uid = change.weapon_uid.unwrap() orelse 0,
             .dressed_equip_list = .initBuffer(
                 dressed_equip_buf[Avatar.equipment_slots * index ..][0..Avatar.equipment_slots],
             ),
-            .is_favorite = change.flags.favorite,
+            .is_favorite = change.meta.flags.favorite,
         };
 
         for (change.equipment_uids, 1..) |maybe_uid, slot| if (maybe_uid.unwrap()) |uid| {

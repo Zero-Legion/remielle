@@ -6,16 +6,7 @@ pub fn mutateAvatar(
     for (input.changes) |change| {
         const index = avatar.indexes.get(change.id).?;
 
-        avatar.metas[index] = .{
-            .level = change.level,
-            .exp = change.exp,
-            .rank = change.rank,
-            .talents = change.talents,
-            .talent_switch = change.talent_switch,
-            .flags = change.flags,
-            .skill_levels = change.skill_levels,
-        };
-
+        avatar.metas[index] = change.meta;
         avatar.weapon_uids[index] = change.weapon_uid;
         avatar.equipment_uids[index] = change.equipment_uids;
     }

@@ -85,13 +85,7 @@ pub fn avatarFavorite(
 
         changes[0] = .{
             .id = avatar.ids[index],
-            .level = meta.level,
-            .exp = meta.exp,
-            .rank = meta.rank,
-            .talents = meta.talents,
-            .talent_switch = meta.talent_switch,
-            .skill_levels = meta.skill_levels,
-            .flags = meta.flags,
+            .meta = meta,
             .weapon_uid = avatar.weapon_uids[index],
             .equipment_uids = avatar.equipment_uids[index],
         };

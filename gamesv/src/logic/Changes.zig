@@ -24,13 +24,7 @@ pub const GameMode = union(enum) {
 /// Avatar modification.
 pub const Avatar = struct {
     id: Properties.Avatar.Id,
-    level: Properties.Avatar.Level,
-    exp: u32,
-    rank: Properties.Avatar.Rank,
-    talents: Properties.Avatar.Talents,
-    talent_switch: Properties.Avatar.TalentSwitch,
-    skill_levels: [Properties.Avatar.Skill.count]Properties.Avatar.Skill.Level,
-    flags: Properties.Avatar.Flags,
+    meta: Properties.Avatar.Meta,
     weapon_uid: Properties.Avatar.OptionalUID,
     equipment_uids: [Properties.Avatar.equipment_slots]Properties.Avatar.OptionalUID,
 };
