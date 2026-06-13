@@ -38,6 +38,7 @@ pub const Meta = struct {
     talent_switch: TalentSwitch,
     flags: Flags,
     skill_levels: [Skill.count]Skill.Level,
+    skin: Skin,
 };
 
 pub const OptionalUID = enum(u32) {
@@ -79,6 +80,15 @@ pub const Talents = enum(u8) {
 
     pub fn toInt(talents: Talents) u8 {
         return @intFromEnum(talents);
+    }
+};
+
+pub const Skin = enum(u32) {
+    none = 0,
+    _,
+
+    pub fn toInt(skin: Skin) u32 {
+        return @intFromEnum(skin);
     }
 };
 

@@ -8119,6 +8119,12 @@ pub const AvatarSkinUnDressCsReq = struct {
     avatar_id: u32 = 0,
 };
 
+pub const AvatarSkinUnDressScRsp = struct {
+    pub const init: @This() = .{};
+    pub const pb_desc_name = "AvatarSkinUnDressScRsp";
+    retcode: i32 = 0,
+};
+
 pub const AICMFDECKEK = struct {
     pub const init: @This() = .{};
     pub const pb_desc_name = "AICMFDECKEK";
@@ -35277,6 +35283,12 @@ pub const AvatarSkinDressCsReq = struct {
     pub const pb_desc_name = "AvatarSkinDressCsReq";
     avatar_id: u32 = 0,
     avatar_skin_id: u32 = 0,
+};
+
+pub const AvatarSkinDressScRsp = struct {
+    pub const init: @This() = .{};
+    pub const pb_desc_name = "AvatarSkinDressScRsp";
+    retcode: i32 = 0,
 };
 
 pub const GLFINACPLOA = struct {

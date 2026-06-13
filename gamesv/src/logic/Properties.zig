@@ -33,6 +33,7 @@ fn unlockAllAvatars(props: *Properties, at: Player) void {
             .talent_switch = .init,
             .flags = .init,
             .skill_levels = undefined,
+            .skin = .none,
         };
 
         inline for (&avatar.metas[i].skill_levels, 0..) |*level, skill_type|

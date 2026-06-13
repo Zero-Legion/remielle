@@ -96,6 +96,80 @@ pub fn avatarFavorite(
     output.respond(.init);
 }
 
+pub fn avatarSkinDress(
+    input: handlers.Input(pb.AvatarSkinDressCsReq),
+    output: handlers.Output(pb.AvatarSkinDressScRsp),
+) !void {
+    const avatar = &input.frame.cvars.properties.avatar[input.frame.target_index];
+
+    const maybe_index: ?u32 = avatar_index: {
+        const id = std.enums.fromInt(Properties.Avatar.Id, input.message.avatar_id) orelse
+            break :avatar_index null;
+
+        break :avatar_index avatar.indexes.get(id);
+    };
+
+    const index = maybe_index orelse
+        return output.bail(.{ .retcode = 1 });
+
+    var meta = avatar.metas[index];
+
+    if (meta.skin.toInt() != input.message.avatar_skin_id) {
+        // TODO: check if it belongs to this avatar and if it's unlocked.
+
+        meta.skin = @enumFromInt(input.message.avatar_skin_id);
+
+        const changes = try output.arena.alloc(logic.Changes.Avatar, 1);
+
+        changes[0] = .{
+            .id = avatar.ids[index],
+            .meta = meta,
+            .weapon_uid = avatar.weapon_uids[index],
+            .equipment_uids = avatar.equipment_uids[index],
+        };
+
+        output.changes.avatars = changes;
+    }
+
+    output.respond(.init);
+}
+
+pub fn avatarSkinUnDress(
+    input: handlers.Input(pb.AvatarSkinUnDressCsReq),
+    output: handlers.Output(pb.AvatarSkinUnDressScRsp),
+) !void {
+    const avatar = &input.frame.cvars.properties.avatar[input.frame.target_index];
+
+    const maybe_index: ?u32 = avatar_index: {
+        const id = std.enums.fromInt(Properties.Avatar.Id, input.message.avatar_id) orelse
+            break :avatar_index null;
+
+        break :avatar_index avatar.indexes.get(id);
+    };
+
+    const index = maybe_index orelse
+        return output.bail(.{ .retcode = 1 });
+
+    var meta = avatar.metas[index];
+
+    if (meta.skin != .none) {
+        meta.skin = .none;
+
+        const changes = try output.arena.alloc(logic.Changes.Avatar, 1);
+
+        changes[0] = .{
+            .id = avatar.ids[index],
+            .meta = meta,
+            .weapon_uid = avatar.weapon_uids[index],
+            .equipment_uids = avatar.equipment_uids[index],
+        };
+
+        output.changes.avatars = changes;
+    }
+
+    output.respond(.init);
+}
+
 const Avatar = Properties.Avatar;
 const ArrayList = std.ArrayList;
 const templates = Assets.templates;
