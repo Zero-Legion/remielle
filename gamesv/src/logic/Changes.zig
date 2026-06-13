@@ -1,8 +1,12 @@
 game_mode: ?GameMode,
+control_avatar: ?ControlAvatar,
+control_guise_avatar: ?ControlGuiseAvatar,
 avatars: []const Avatar,
 
 pub const init: Changes = .{
     .game_mode = null,
+    .control_avatar = null,
+    .control_guise_avatar = null,
     .avatars = &.{},
 };
 
@@ -20,6 +24,10 @@ pub const GameMode = union(enum) {
         section_id: templates.section_config.Id,
     };
 };
+
+pub const ControlAvatar = Properties.HallAvatar;
+
+pub const ControlGuiseAvatar = Properties.HallAvatar.Guise;
 
 /// Avatar modification.
 pub const Avatar = struct {

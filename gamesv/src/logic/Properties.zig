@@ -62,7 +62,7 @@ pub const BasicInfo = struct {
         .level = .max,
         .avatar = .wise,
         .control_avatar = .wise,
-        .control_guise_avatar = .fromId(.velina),
+        .control_guise_avatar = .fromIdUnchecked(.velina),
     };
 };
 
@@ -81,16 +81,14 @@ pub const HallAvatar = enum(u32) {
     wise = @intFromEnum(templates.avatar_base.Id.wise),
     belle = @intFromEnum(templates.avatar_base.Id.belle),
 
-    pub const FromIntError = error{InvalidHallAvatar};
-
     /// Doesn't allow zero.
-    pub fn fromInt(int: u32) FromIntError!HallAvatar {
+    pub fn fromInt(int: u32) ?HallAvatar {
         const avatar = std.enums.fromInt(HallAvatar, int) orelse
-            return error.HallAvatar;
+            return null;
 
         return switch (avatar) {
             .wise, .belle => |a| a,
-            .none => error.InvalidHallAvatar,
+            .none => null,
         };
     }
 
@@ -104,7 +102,27 @@ pub const HallAvatar = enum(u32) {
         belle = @intFromEnum(HallAvatar.belle),
         _,
 
-        pub fn fromId(id: templates.avatar_base.Id) Guise {
+        pub const FromRawIdError = error{
+            InvalidAvatarId,
+            AvatarNotUnlocked,
+        };
+
+        pub fn fromRawId(player_avatar_prop: *const Avatar, raw_id: u32) !Guise {
+            if (raw_id == 0) return .none;
+
+            const id = std.enums.fromInt(templates.avatar_base.Id, raw_id) orelse
+                return error.InvalidAvatarId;
+
+            return switch (id) {
+                .wise, .belle => .fromIdUnchecked(id),
+                else => if (player_avatar_prop.indexes.contains(id))
+                    .fromIdUnchecked(id)
+                else
+                    error.AvatarNotUnlocked,
+            };
+        }
+
+        pub fn fromIdUnchecked(id: templates.avatar_base.Id) Guise {
             return @enumFromInt(@intFromEnum(id));
         }
 

@@ -30528,6 +30528,12 @@ pub const ModAvatarCsReq = struct {
     control_guise_avatar_id: u32 = 0,
 };
 
+pub const ModAvatarScRsp = struct {
+    pub const init: @This() = .{};
+    pub const pb_desc_name = "ModAvatarScRsp";
+    retcode: i32 = 0,
+};
+
 pub const GGLLDNLKLFN = struct {
     pub const init: @This() = .{};
     pub const pb_desc_name = "GGLLDNLKLFN";
