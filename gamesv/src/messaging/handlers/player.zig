@@ -13,14 +13,7 @@ pub fn getSelfBasicInfo(
     const info = &input.frame.cvars.properties.basic_info[input.frame.target_index];
 
     output.respond(.{
-        .self_basic_info = .{
-            .level = info.level.toInt(),
-            .nick_name = "xeondev", // TODO
-            .name_change_times = 1, // TODO
-            .avatar_id = info.avatar.toInt(),
-            .control_avatar_id = info.control_avatar.toInt(),
-            .control_guise_avatar_id = info.control_guise_avatar.toInt(),
-        },
+        .self_basic_info = try packers.packSelfBasicInfo(output.arena, info),
     });
 }
 
@@ -58,5 +51,6 @@ const templates = Assets.templates;
 
 const pb = @import("rmpb").main;
 const logic = @import("../../logic.zig");
+const packers = @import("../packers.zig");
 const Assets = @import("../../Assets.zig");
 const handlers = @import("../handlers.zig");

@@ -24,23 +24,14 @@ pub fn playerSync(
 
 fn buildSelfBasicInfo(
     arena: Allocator,
-    property: *const Properties.BasicInfo,
+    info: *const Properties.BasicInfo,
     control_avatar: []const logic.Changes.ControlAvatar,
     control_guise_avatar: []const logic.Changes.ControlGuiseAvatar,
 ) !?pb.SelfBasicInfo {
-    _ = arena;
-
     if (control_avatar.len == 0 and control_guise_avatar.len == 0)
         return null;
 
-    return .{
-        .level = property.level.toInt(),
-        .nick_name = "xeondev", // TODO
-        .name_change_times = 1, // TODO
-        .avatar_id = property.avatar.toInt(),
-        .control_avatar_id = property.control_avatar.toInt(),
-        .control_guise_avatar_id = property.control_guise_avatar.toInt(),
-    };
+    return try packers.packSelfBasicInfo(arena, info);
 }
 
 fn buildAvatarSync(arena: Allocator, changes: []const logic.Changes.Avatar) !?pb.AvatarSync {
