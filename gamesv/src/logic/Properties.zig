@@ -32,7 +32,11 @@ fn unlockAllAvatars(props: *Properties, at: Player) void {
             .talents = .max,
             .talent_switch = .init,
             .flags = .init,
+            .skill_levels = undefined,
         };
+
+        inline for (&avatar.metas[i].skill_levels, 0..) |*level, skill_type|
+            level.* = .maxFor(@enumFromInt(skill_type));
 
         avatar.weapon_uids[i] = .none;
         avatar.equipment_uids[i] = @splat(.none);

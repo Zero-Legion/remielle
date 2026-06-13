@@ -37,6 +37,7 @@ pub const Meta = struct {
     talents: Talents,
     talent_switch: TalentSwitch,
     flags: Flags,
+    skill_levels: [Skill.count]Skill.Level,
 };
 
 pub const OptionalUID = enum(u32) {
@@ -87,6 +88,38 @@ pub const Flags = packed struct {
     pub const init: Flags = .{
         .favorite = false,
     };
+};
+
+pub const Skill = enum(u8) {
+    pub const count: usize = 7;
+
+    common_attack = 0,
+    special_attack = 1,
+    evade = 2,
+    cooperate_skill = 3,
+    unique_skill = 4,
+    core_skill = 5,
+    assist_skill = 6,
+
+    pub const Level = enum(u8) {
+        init = 1,
+        _,
+
+        pub fn maxFor(skill: Skill) Skill.Level {
+            return @enumFromInt(@as(u8, switch (skill) {
+                .core_skill => 7,
+                else => 12,
+            }));
+        }
+
+        pub fn toInt(level: Skill.Level) u8 {
+            return @intFromEnum(level);
+        }
+    };
+
+    pub fn toInt(skill: Skill) u32 {
+        return @intFromEnum(skill);
+    }
 };
 
 pub const TalentSwitch = enum(u6) {
