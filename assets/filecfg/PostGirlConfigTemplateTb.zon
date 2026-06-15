@@ -275,6 +275,16 @@
         .unlock_condition = "",
     },
     .{
+        .id = 3510053,
+        .name = "Avatar_Female_Size03_Velina",
+        .unlock_condition = "",
+    },
+    .{
+        .id = 3510054,
+        .name = "Avatar_Female_Size01_Norma",
+        .unlock_condition = "",
+    },
+    .{
         .id = 3550000,
         .name = "LiveWallpaper_Activity001",
         .unlock_condition = "",

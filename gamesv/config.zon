@@ -7,5 +7,5 @@
     // Can be overridden by the `-c` option.
     .concurrent_sessions = 64,
 
-    .dummy_cmd = "FDPBKJGJBBL",
+    .dummy_cmd = "GNIBBDCLMAA",
 }

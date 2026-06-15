@@ -63,7 +63,7 @@ pub const BasicInfo = struct {
         .level = .max,
         .avatar = .wise,
         .control_avatar = .wise,
-        .control_guise_avatar = .fromIdUnchecked(.velina),
+        .control_guise_avatar = .fromIdUnchecked(.remielle),
     };
 };
 

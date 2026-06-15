@@ -29,7 +29,7 @@ pub fn getMiscData(
 
     var show_post_girls: std.ArrayList(u32) = try .initCapacity(output.arena, 1);
     show_post_girls.appendAssumeCapacity(
-        @intFromEnum(templates.post_girl_config.Id.Avatar_Female_Size03_Promeia),
+        @intFromEnum(templates.post_girl_config.Id.Avatar_Female_Size03_Velina),
     );
 
     const basic_info = &input.frame.cvars.properties.basic_info[input.frame.target_index];
