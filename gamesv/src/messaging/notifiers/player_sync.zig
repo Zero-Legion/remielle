@@ -1,27 +1,30 @@
 pub fn playerSync(
-    inputs: Inputs(.{
+    properties: logic.Properties.Immutable(.{
+        logic.Properties.BasicInfo,
+    }),
+    changes: logic.Changes.Subset(.{
         logic.Changes.ControlAvatar,
         logic.Changes.ControlGuiseAvatar,
         logic.Changes.Avatar,
     }),
-    output: Output(pb.PlayerSyncScNotify),
+    notify: Notify(pb.PlayerSyncScNotify),
 ) !void {
-    var notify: pb.PlayerSyncScNotify = .init;
+    var sync: pb.PlayerSyncScNotify = .init;
 
-    notify.self_basic_info = try buildSelfBasicInfo(
-        output.arena,
-        &inputs.frame.cvars.properties.basic_info[inputs.frame.target_index],
-        inputs.changes.control_avatar,
-        inputs.changes.control_guise_avatar,
+    sync.self_basic_info = try buildSelfBasicInfo(
+        notify.arena,
+        properties.basic_info,
+        changes.control_avatar,
+        changes.control_guise_avatar,
     );
 
-    notify.avatar = try buildAvatarSync(output.arena, inputs.changes.avatars);
+    sync.avatar = try buildAvatarSync(notify.arena, changes.avatars);
 
-    notify.misc = .{
-        .player_accessory = try buildPlayerAccessory(output.arena, inputs.changes.control_guise_avatar),
+    sync.misc = .{
+        .player_accessory = try buildPlayerAccessory(notify.arena, changes.control_guise_avatar),
     };
 
-    output.one(notify);
+    notify.one(sync);
 }
 
 fn buildSelfBasicInfo(
@@ -66,8 +69,7 @@ fn buildPlayerAccessory(
     return .{ .control_guise_avatar_id = control_guise_avatar.toInt() };
 }
 
-const Inputs = notifiers.Inputs;
-const Output = notifiers.Output;
+const Notify = notifiers.Notify;
 
 const Avatar = Properties.Avatar;
 const Allocator = std.mem.Allocator;

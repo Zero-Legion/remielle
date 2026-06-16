@@ -13,54 +13,56 @@ pub fn notifyLogicChanges(
 ) Error!void {
     inline for (namespaces) |ns| inline for (@typeInfo(ns).@"struct".decls) |decl| {
         const Fn = @TypeOf(@field(ns, decl.name));
-        const fn_info = @typeInfo(Fn).@"fn";
+        const Args = std.meta.ArgsTuple(Fn);
 
-        if (fn_info.params.len != 2)
-            @compileError("invalid parameters declared on notifier '" ++ decl.name ++ "'");
+        var args: Args = undefined;
+        var notify: NotifyOf(Fn) = .init(arena);
 
-        const In = fn_info.params[0].type.?;
-        const Out = @typeInfo(fn_info.params[1].type.?).pointer.child;
+        call_notifier: {
+            inline for (&args, @typeInfo(Args).@"struct".fields) |*arg, arg_info| {
+                const ArgType = arg_info.type;
 
-        if (changes.extract(In.Changes)) |in_changes| call: {
-            const inputs: In = .{ .frame = frame, .changes = in_changes };
-            var output: Out = .init(arena);
+                if (ArgType == *NotifyOf(Fn)) {
+                    arg.* = &notify;
+                    continue;
+                }
 
-            @field(ns, decl.name)(inputs, &output) catch |err| switch (@as(NotifierError, err)) {
+                if (@hasField(ArgType, logic.Changes.subset_marker_name)) {
+                    arg.* = changes.extract(ArgType) orelse break :call_notifier;
+                    continue;
+                }
+
+                // Accepting mutable properties is intentionally not allowed.
+                if (@hasField(ArgType, logic.Properties.immutable_subset_marker_name)) {
+                    arg.* = frame.cvars.properties.extractFor(ArgType, frame.target_index);
+                    continue;
+                }
+
+                @compileError(decl.name ++ ": invalid argument type: " ++ @typeName(ArgType));
+            }
+
+            @call(.auto, @field(ns, decl.name), args) catch |err| switch (@as(Error, err)) {
                 else => |e| return e,
             };
 
-            const notifies = switch (output.to_send) {
-                .none => break :call,
+            const notifies = switch (notify.to_send) {
+                .none => break :call_notifier,
                 .one => |*one| one[0..1],
                 .many => |many| many,
             };
 
-            for (notifies) |notify| try messaging.send(
+            for (notifies) |message| try messaging.send(
                 frame.multi_conversation,
                 frame.cvars,
                 frame.target_index,
                 .notify,
-                notify,
+                message,
             );
         }
     };
 }
 
-pub fn Inputs(
-    /// A tuple of input types (fields of logic.Changes)
-    comptime in_changes: anytype,
-) type {
-    return struct {
-        const In = @This();
-
-        pub const Changes = logic.Changes.Subset(in_changes);
-
-        frame: *const Server.Frame,
-        changes: Changes,
-    };
-}
-
-pub fn Output(comptime OutNotify: type) type {
+pub fn Notify(comptime OutNotify: type) type {
     return *struct {
         const Out = @This();
 
@@ -87,6 +89,22 @@ pub fn Output(comptime OutNotify: type) type {
             out.to_send = .{ .many = notifies };
         }
     };
+}
+
+fn NotifyOf(Fn: type) type {
+    var Type: ?type = null;
+
+    inline for (@typeInfo(Fn).@"fn".params) |param| {
+        switch (@typeInfo(param.type.?)) {
+            .pointer => |pointer| if (@hasDecl(pointer.child, "Notify")) {
+                if (Type != null) @compileError("notifiers: multiple notifies are not allowed");
+                Type = pointer.child;
+            },
+            else => continue,
+        }
+    }
+
+    return Type orelse @compileError("notifiers: not a single output defined");
 }
 
 const Allocator = std.mem.Allocator;

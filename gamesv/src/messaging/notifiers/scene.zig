@@ -1,17 +1,21 @@
 pub fn switchGameMode(
-    inputs: Inputs(.{logic.Changes.GameMode}),
-    output: Output(pb.EnterSceneScNotify),
+    properties: logic.Properties.Immutable(.{
+        logic.Properties.BasicInfo,
+    }),
+    changes: logic.Changes.Subset(.{
+        logic.Changes.GameMode,
+    }),
+    notify: Notify(pb.EnterSceneScNotify),
 ) !void {
-    const game_mode = inputs.changes.game_mode.?;
-    const basic_info = &inputs.frame.cvars.properties.basic_info[inputs.frame.target_index];
+    const game_mode = changes.game_mode.?;
 
     switch (game_mode) {
-        .hall => |hall| output.one(.{ .scene = .{
+        .hall => |hall| notify.one(.{ .scene = .{
             .scene_type = 1,
             .hall_scene_data = .{
                 .section_id = @intFromEnum(hall.section_id),
-                .control_avatar_id = basic_info.control_avatar.toInt(),
-                .control_guise_avatar_id = basic_info.control_guise_avatar.toInt(),
+                .control_avatar_id = properties.basic_info.control_avatar.toInt(),
+                .control_guise_avatar_id = properties.basic_info.control_guise_avatar.toInt(),
             },
         } }),
     }
@@ -19,8 +23,7 @@ pub fn switchGameMode(
 
 const templates = Assets.templates;
 
-const Inputs = notifiers.Inputs;
-const Output = notifiers.Output;
+const Notify = notifiers.Notify;
 
 const logic = @import("../../logic.zig");
 const Assets = @import("../../Assets.zig");
