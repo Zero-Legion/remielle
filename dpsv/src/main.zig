@@ -9,12 +9,7 @@ pub const std_options: std.Options = .{
     .logFn = rmio.log.logFn,
 };
 
-var cancelation: rmio.Cancelation = .init;
-
-var main_thread_id: Thread.Id = undefined;
-var main_thread: posix.thread_t = undefined;
-
-pub fn main(init: Init.Minimal) u8 {
+pub fn main(init: Init.Minimal) void {
     var debug_allocator: heap.DebugAllocator(.{}) = .init;
     defer if (is_debug) {
         _ = debug_allocator.deinit();
@@ -37,34 +32,25 @@ pub fn main(init: Init.Minimal) u8 {
         .{ options_err, args[0], rmcli.opt.Usage(Options) },
     );
 
-    const listen_address = posix.Sockaddr.parseIp4(options.listen_address) catch |err| {
-        log.err("bad listen address specified: {t}", .{err});
-        return 1;
-    };
+    const listen_address = net.IpAddress.parseLiteral(options.listen_address) catch |err|
+        fatal("bad listen address specified: {t}", .{err});
 
     const data = Data.build(arena.allocator()) catch |err| switch (err) {
         error.OutOfMemory => fatal("failed to build static responses", .{}),
     };
 
-    main_thread_id = Thread.getCurrentId();
-    main_thread = posix.thread_self();
+    var io_impl = if (rmio.RemiellIo.supported)
+        rmio.RemiellIo.init(gpa, .{ .coroutine_limit = .unlimited, .stack_size = 1024 * 32 }) catch |err|
+            fatal("failed to init I/O implementation: {t}", .{err})
+    else
+        std.Io.Threaded.init(gpa, .{});
 
-    posix.sigaction(.INT, &.{
-        .handler = .{ .handler = sigintHandler },
-        .mask = std.mem.zeroes(@FieldType(posix.Sigaction, "mask")),
-        .flags = 0,
-    }, null);
+    defer io_impl.deinit();
+    const io = io_impl.io();
 
-    app.listen(&cancelation, arena.allocator(), options.slots, &data, &listen_address);
-    return 0;
-}
-
-fn sigintHandler(_: posix.SIG) callconv(.c) void {
-    cancelation.cancel();
-
-    // Will only happen on windows
-    if (Thread.getCurrentId() != main_thread_id)
-        posix.thread_kill(main_thread, .IO);
+    app.listen(io, &data, &listen_address) catch |err| switch (err) {
+        error.Canceled => unreachable,
+    };
 }
 
 inline fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
@@ -76,8 +62,6 @@ const is_debug = builtin.mode == .Debug;
 
 const Init = std.process.Init;
 
-const Thread = std.Thread;
-const posix = rmio.posix;
 const heap = std.heap;
 const net = std.Io.net;
 const exit = std.process.exit;

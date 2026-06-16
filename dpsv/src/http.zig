@@ -16,11 +16,18 @@ pub const RequestLine = struct {
     query: []const u8,
 
     pub const ParseError = error{
+        /// The request line didn't fit into `reader.buffer`.
+        StreamTooLong,
+        /// The request line doesn't contain the required components in canonical form.
         MissingComponents,
+        /// The specified request method is not defined in `Method`.
         UnsupportedMethod,
-    };
+    } || Io.Reader.Error;
 
-    pub fn parse(line: []const u8) ParseError!RequestLine {
+    /// `reader` must have a non-zero buffer size.
+    pub fn parse(reader: *Io.Reader) ParseError!RequestLine {
+        const line = try reader.takeDelimiterInclusive('\r');
+
         var parts = std.mem.tokenizeScalar(u8, line, ' ');
         const raw_method = parts.next() orelse return error.MissingComponents;
         const method = std.meta.stringToEnum(Method, raw_method) orelse
