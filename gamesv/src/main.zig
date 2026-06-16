@@ -37,7 +37,7 @@ pub fn main(init: Init.Minimal) void {
         fatal("bad bind address specified: {t}", .{err});
 
     var io_impl = if (rmio.RemiellIo.supported)
-        rmio.RemiellIo.init(gpa, .{ .coroutine_limit = .unlimited, .stack_size = 1024 * 128 }) catch |err|
+        rmio.RemiellIo.init(gpa, .{ .coroutine_limit = .unlimited, .stack_size = 1024 * 1024 }) catch |err|
             fatal("failed to init I/O implementation: {t}", .{err})
     else
         std.Io.Threaded.init(gpa, .{});
