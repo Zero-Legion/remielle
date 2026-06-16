@@ -17,20 +17,25 @@ pub fn logFn(
 }
 
 const Writer = struct {
-    file: posix.fd_t,
+    file: std.Io.File.Handle,
     interface: std.Io.Writer,
 
-    pub fn init(file: posix.fd_t, buffer: []u8) Writer {
+    pub fn init(file: std.Io.File.Handle, buffer: []u8) Writer {
         return .{
             .file = file,
             .interface = .{
                 .buffer = buffer,
-                .vtable = &.{ .drain = drain },
+                .vtable = &.{
+                    .drain = if (is_windows)
+                        drainWindows
+                    else
+                        drainPosix,
+                },
             },
         };
     }
 
-    fn drain(io_w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+    fn drainPosix(io_w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
         const writer: *Writer = @alignCast(@fieldParentPtr("interface", io_w));
 
         var splat_backup_buffer: [64]u8 = undefined;
@@ -76,8 +81,11 @@ const Writer = struct {
             return 0;
         }
 
-        const written = posix.writev(writer.file, iovecs_buffer[0..iovecs_count]) catch
-            return error.WriteFailed;
+        const rc = posix.system.writev(writer.file, &iovecs_buffer, @intCast(iovecs_count));
+        const written: usize = switch (posix.errno(rc)) {
+            .SUCCESS => @intCast(rc),
+            else => return error.WriteFailed,
+        };
 
         if (io_w.end == 0) return written;
 
@@ -99,8 +107,48 @@ const Writer = struct {
         iovecs[count.*] = .{ .base = data.ptr, .len = @intCast(data.len) };
         return true;
     }
+
+    fn drainWindows(io_w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+        _ = splat;
+        const writer: *Writer = @alignCast(@fieldParentPtr("interface", io_w));
+
+        // Because Windows doesn't have sane vectored I/O API for files,
+        // let the Io.Writer amortize drains by utilizing its own buffer.
+
+        if (io_w.end != 0) {
+            const written = try writeOneWindows(writer.file, io_w.buffer[0..io_w.end]);
+            _ = io_w.consume(written);
+            return 0;
+        }
+
+        if (data[0].len != 0)
+            return writeOneWindows(writer.file, data[0]);
+
+        return 0;
+    }
+
+    fn writeOneWindows(file: std.Io.File.Handle, buf: []const u8) std.Io.Writer.Error!usize {
+        var iosb: windows.IO_STATUS_BLOCK = undefined;
+        return switch (windows.ntdll.NtWriteFile(
+            file,
+            null, // Event
+            null, // ApcRoutine
+            null, // ApcContext
+            &iosb,
+            buf.ptr,
+            @truncate(buf.len),
+            null, // ByteOffset
+            null, // Key
+        )) {
+            .SUCCESS => @intCast(iosb.Information),
+            else => error.WriteFailed,
+        };
+    }
 };
 
-const posix = rmio.posix;
-const rmio = @import("root.zig");
+const is_windows = @import("builtin").os.tag == .windows;
+
+const posix = std.posix;
+const windows = std.os.windows;
+
 const std = @import("std");
