@@ -1,12 +1,11 @@
 pub fn switchGameMode(
-    input: notifiers.Input(logic.Changes.GameMode),
-    output: notifiers.Output(pb.EnterSceneScNotify),
+    inputs: Inputs(.{logic.Changes.GameMode}),
+    output: Output(pb.EnterSceneScNotify),
 ) !void {
-    std.debug.assert(input.changes.len == 1);
+    const game_mode = inputs.changes.game_mode.?;
+    const basic_info = &inputs.frame.cvars.properties.basic_info[inputs.frame.target_index];
 
-    const basic_info = &input.frame.cvars.properties.basic_info[input.frame.target_index];
-
-    switch (input.changes[0]) {
+    switch (game_mode) {
         .hall => |hall| output.one(.{ .scene = .{
             .scene_type = 1,
             .hall_scene_data = .{
@@ -19,6 +18,9 @@ pub fn switchGameMode(
 }
 
 const templates = Assets.templates;
+
+const Inputs = notifiers.Inputs;
+const Output = notifiers.Output;
 
 const logic = @import("../../logic.zig");
 const Assets = @import("../../Assets.zig");

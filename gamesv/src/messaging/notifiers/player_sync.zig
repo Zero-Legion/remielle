@@ -1,22 +1,24 @@
 pub fn playerSync(
-    control_avatar: notifiers.Input(logic.Changes.ControlAvatar),
-    control_guise_avatar: notifiers.Input(logic.Changes.ControlGuiseAvatar),
-    avatar: notifiers.Input(logic.Changes.Avatar),
-    output: notifiers.Output(pb.PlayerSyncScNotify),
+    inputs: Inputs(.{
+        logic.Changes.ControlAvatar,
+        logic.Changes.ControlGuiseAvatar,
+        logic.Changes.Avatar,
+    }),
+    output: Output(pb.PlayerSyncScNotify),
 ) !void {
     var notify: pb.PlayerSyncScNotify = .init;
 
     notify.self_basic_info = try buildSelfBasicInfo(
         output.arena,
-        &control_avatar.frame.cvars.properties.basic_info[control_avatar.frame.target_index],
-        control_avatar.changes,
-        control_guise_avatar.changes,
+        &inputs.frame.cvars.properties.basic_info[inputs.frame.target_index],
+        inputs.changes.control_avatar,
+        inputs.changes.control_guise_avatar,
     );
 
-    notify.avatar = try buildAvatarSync(output.arena, avatar.changes);
+    notify.avatar = try buildAvatarSync(output.arena, inputs.changes.avatars);
 
     notify.misc = .{
-        .player_accessory = try buildPlayerAccessory(output.arena, control_guise_avatar.changes),
+        .player_accessory = try buildPlayerAccessory(output.arena, inputs.changes.control_guise_avatar),
     };
 
     output.one(notify);
@@ -25,10 +27,10 @@ pub fn playerSync(
 fn buildSelfBasicInfo(
     arena: Allocator,
     info: *const Properties.BasicInfo,
-    control_avatar: []const logic.Changes.ControlAvatar,
-    control_guise_avatar: []const logic.Changes.ControlGuiseAvatar,
+    control_avatar: ?logic.Changes.ControlAvatar,
+    control_guise_avatar: ?logic.Changes.ControlGuiseAvatar,
 ) !?pb.SelfBasicInfo {
-    if (control_avatar.len == 0 and control_guise_avatar.len == 0)
+    if (control_avatar == null and control_guise_avatar == null)
         return null;
 
     return try packers.packSelfBasicInfo(arena, info);
@@ -54,15 +56,18 @@ fn buildAvatarSync(arena: Allocator, changes: []const logic.Changes.Avatar) !?pb
 
 fn buildPlayerAccessory(
     arena: Allocator,
-    control_guise_avatar: []const logic.Changes.ControlGuiseAvatar,
+    maybe_control_guise_avatar: ?logic.Changes.ControlGuiseAvatar,
 ) !?pb.PlayerAccessorySync {
     _ = arena;
 
-    if (control_guise_avatar.len == 0)
+    const control_guise_avatar = maybe_control_guise_avatar orelse
         return null;
 
-    return .{ .control_guise_avatar_id = control_guise_avatar[0].toInt() };
+    return .{ .control_guise_avatar_id = control_guise_avatar.toInt() };
 }
+
+const Inputs = notifiers.Inputs;
+const Output = notifiers.Output;
 
 const Avatar = Properties.Avatar;
 const Allocator = std.mem.Allocator;

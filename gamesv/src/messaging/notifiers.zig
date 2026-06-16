@@ -13,28 +13,18 @@ pub fn notifyLogicChanges(
 ) Error!void {
     inline for (namespaces) |ns| inline for (@typeInfo(ns).@"struct".decls) |decl| {
         const Fn = @TypeOf(@field(ns, decl.name));
-        const Args = std.meta.ArgsTuple(Fn);
+        const fn_info = @typeInfo(Fn).@"fn";
 
-        var output: OutputOf(Fn) = .init(arena);
+        if (fn_info.params.len != 2)
+            @compileError("invalid parameters declared on notifier '" ++ decl.name ++ "'");
 
-        var args: Args = undefined;
-        var fulfilled_inputs: u32 = 0;
+        const In = fn_info.params[0].type.?;
+        const Out = @typeInfo(fn_info.params[1].type.?).pointer.child;
 
-        inline for (@typeInfo(Args).@"struct".fields, &args) |arg_info, *arg| {
-            switch (arg_info.type) {
-                *OutputOf(Fn) => arg.* = &output,
-                else => |Arg| switch (@typeInfo(Arg)) {
-                    .@"struct" => if (@hasDecl(Arg, "Change")) {
-                        arg.* = .init(frame, changes);
-                        fulfilled_inputs += @intFromBool(arg.anythingChanged());
-                    } else @compileError("Invalid argument type: " ++ @typeName(Arg)),
-                    else => |kind| @compileError("Invalid argument kind: " ++ @tagName(kind)),
-                },
-            }
-        }
-
-        if (fulfilled_inputs != 0) call: {
-            @call(.auto, @field(ns, decl.name), args) catch |err| switch (@as(NotifierError, err)) {
+        var inputs: In = .init(frame, changes);
+        if (inputs.fulfilled()) call: {
+            var output: Out = .init(arena);
+            @field(ns, decl.name)(inputs, &output) catch |err| switch (@as(NotifierError, err)) {
                 else => |e| return e,
             };
 
@@ -55,34 +45,57 @@ pub fn notifyLogicChanges(
     };
 }
 
-pub fn Input(comptime InChange: type) type {
+pub fn Inputs(
+    /// A tuple of input types (fields of logic.Changes)
+    comptime in_changes: anytype,
+) type {
     return struct {
         const In = @This();
 
-        pub const Change = InChange;
+        pub const Changes = Changes: {
+            var field_types: [in_changes.len]type = undefined;
+            var field_names: [in_changes.len][]const u8 = undefined;
+
+            const changes_fields = @typeInfo(logic.Changes).@"struct".fields;
+
+            for (in_changes, &field_types, &field_names) |C, *field_type, *field_name| {
+                search: for (changes_fields) |changes_field| {
+                    if (changes_field.type == ?C or changes_field.type == []const C) {
+                        field_type.* = changes_field.type;
+                        field_name.* = changes_field.name;
+                        break :search;
+                    }
+                } else @compileError("Invalid change type: " ++ @typeName(C));
+            }
+
+            break :Changes @Struct(.auto, null, &field_names, &field_types, &@splat(.{}));
+        };
 
         frame: *const Server.Frame,
-        changes: []const Change,
+        changes: Changes,
 
         pub fn init(frame: *const Server.Frame, logic_changes: *const logic.Changes) In {
-            const changes: []const Change = changes: inline for (
-                @typeInfo(logic.Changes).@"struct".fields,
-            ) |struct_field| {
-                switch (struct_field.type) {
-                    ?Change => break :changes if (@field(logic_changes, struct_field.name)) |*change|
-                        change[0..1]
-                    else
-                        &.{},
-                    []const Change, []Change => break :changes @field(logic_changes, struct_field.name),
-                    else => continue,
-                }
-            } else @compileError("Invalid change type: " ++ @typeName(Change));
+            var changes: Changes = undefined;
+
+            inline for (@typeInfo(Changes).@"struct".fields) |field| {
+                @field(changes, field.name) = @field(logic_changes, field.name);
+            }
 
             return .{ .changes = changes, .frame = frame };
         }
 
-        fn anythingChanged(in: *const In) bool {
-            return in.changes.len != 0;
+        fn fulfilled(in: *const In) bool {
+            inline for (@typeInfo(Changes).@"struct".fields) |field| {
+                switch (@typeInfo(field.type)) {
+                    .optional => if (@field(in.changes, field.name) != null)
+                        return true,
+                    .pointer => if (@field(in.changes, field.name).len != 0)
+                        return true,
+                    else => comptime unreachable,
+                }
+            }
+
+            return false;
         }
     };
 }
@@ -114,22 +127,6 @@ pub fn Output(comptime OutNotify: type) type {
             out.to_send = .{ .many = notifies };
         }
     };
-}
-
-fn OutputOf(Fn: type) type {
-    var Type: ?type = null;
-
-    inline for (@typeInfo(Fn).@"fn".params) |param| {
-        switch (@typeInfo(param.type.?)) {
-            .pointer => |pointer| if (@hasDecl(pointer.child, "Notify")) {
-                if (Type != null) @compileError("notifiers: multiple outputs are not allowed");
-                Type = pointer.child;
-            },
-            else => continue,
-        }
-    }
-
-    return Type orelse @compileError("notifiers: not a single output defined");
 }
 
 const Allocator = std.mem.Allocator;
