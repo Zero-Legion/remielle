@@ -3,7 +3,7 @@ pub fn getServerTimestamp(
     output: handlers.Output(pb.GetServerTimestampScRsp),
 ) !void {
     output.respond(.{
-        .timestamp = @intCast(posix.timespecToMs(input.frame.time)),
+        .timestamp = @intCast(input.frame.time.toMilliseconds()),
     });
 }
 
@@ -52,6 +52,5 @@ const templates = Assets.templates;
 const Assets = @import("../../Assets.zig");
 const handlers = @import("../handlers.zig");
 
-const posix = @import("rmio").posix;
 const pb = @import("rmpb").main;
 const std = @import("std");

@@ -200,8 +200,6 @@ const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const ClientVariables = Server.ClientVariables;
 
-const posix = rmio.posix;
-
 const Server = @import("../Server.zig");
 
 const kcp = @import("../kcp.zig");

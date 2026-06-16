@@ -10,13 +10,7 @@ pub const std_options: std.Options = .{
     .logFn = rmio.log.logFn,
 };
 
-var cancelation: rmio.Cancelation = .init;
-
-// Populated by `main`
-var main_thread_id: Thread.Id = undefined;
-var main_thread: posix.thread_t = undefined;
-
-pub fn main(init: Init.Minimal) u8 {
+pub fn main(init: Init.Minimal) void {
     var debug_allocator: heap.DebugAllocator(.{}) = .init;
     defer if (is_debug) {
         _ = debug_allocator.deinit();
@@ -39,44 +33,32 @@ pub fn main(init: Init.Minimal) u8 {
         .{ options_err, args[0], rmcli.opt.Usage(Options) },
     );
 
-    const bind_address = posix.Sockaddr.parseIp4(options.bind_address) catch |err| {
-        log.err("bad bind address specified: {t}", .{err});
-        return 1;
-    };
+    const bind_address = net.IpAddress.parseLiteral(options.bind_address) catch |err|
+        fatal("bad bind address specified: {t}", .{err});
+
+    var io_impl = if (rmio.RemiellIo.supported)
+        rmio.RemiellIo.init(gpa, .{ .coroutine_limit = .unlimited, .stack_size = 1024 * 32 }) catch |err|
+            fatal("failed to init I/O implementation: {t}", .{err})
+    else
+        std.Io.Threaded.init(gpa, .{});
+
+    defer io_impl.deinit();
+    const io = io_impl.io();
 
     var csprng_seed: [DefaultCsprng.secret_seed_length]u8 = undefined;
-    posix.getentropy(&csprng_seed) catch |err| switch (err) {
+    io.randomSecure(&csprng_seed) catch |err| switch (err) {
+        error.Canceled => unreachable, // no
         error.EntropyUnavailable => if (options.insecure_random_allowed) {
-            // Fallback seed
-            const timestamp = posix.timespecToNs(posix.clock_gettime(.MONOTONIC) catch
-                std.mem.zeroes(posix.timespec));
-
-            std.mem.writeInt(i96, csprng_seed[0 .. @bitSizeOf(i96) / 8], timestamp, .big);
+            io.random(&csprng_seed);
         } else fatal("failed to collect entropy", .{}),
     };
 
     var csprng_impl: DefaultCsprng = .init(csprng_seed);
     const csprng = csprng_impl.random();
 
-    main_thread_id = Thread.getCurrentId();
-    main_thread = posix.thread_self();
-
-    posix.sigaction(.INT, &.{
-        .handler = .{ .handler = sigintHandler },
-        .mask = std.mem.zeroes(@FieldType(posix.Sigaction, "mask")),
-        .flags = 0,
-    }, null);
-
-    app.bind(&cancelation, gpa, csprng, &bind_address, options.concurrent_sessions);
-    return 0;
-}
-
-fn sigintHandler(_: posix.SIG) callconv(.c) void {
-    cancelation.cancel();
-
-    // Will only happen on windows
-    if (Thread.getCurrentId() != main_thread_id)
-        posix.thread_kill(main_thread, .IO);
+    app.bind(io, gpa, csprng, &bind_address, options.concurrent_sessions) catch |err| switch (err) {
+        error.Canceled => unreachable,
+    };
 }
 
 inline fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
@@ -86,11 +68,10 @@ inline fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
 
 const is_debug = builtin.mode == .Debug;
 
-const Thread = std.Thread;
+const Io = std.Io;
 const Init = std.process.Init;
 const DefaultCsprng = std.Random.DefaultCsprng;
 
-const posix = rmio.posix;
 const heap = std.heap;
 const net = std.Io.net;
 const exit = std.process.exit;

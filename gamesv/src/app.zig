@@ -1,27 +1,24 @@
 const log = std.log.scoped(.@"remielle-gamesv");
 
 pub fn bind(
-    cancelation: *const Cancelation,
+    io: Io,
     gpa: Allocator,
     csprng: Random,
-    bind_address: *const posix.Sockaddr,
+    udp_address: *const net.IpAddress,
     concurrent_sessions: u32,
-) void {
-    const server_fd = posix.socket(.INET, .init(.DGRAM, .flags(.{
-        .CLOEXEC = true,
-        .NONBLOCK = true,
-    })), .UDP) catch |err|
-        fatal("socket: {t}", .{err});
-
-    defer posix.close(server_fd);
-
-    posix.bind(server_fd, bind_address) catch |err| switch (err) {
+) Io.Cancelable!void {
+    const udp_socket = udp_address.bind(
+        io,
+        .{ .mode = .dgram, .protocol = .udp },
+    ) catch |err| switch (err) {
         error.AddressInUse => fatal(
             "the address {f} is already in use; another instance of this server might be already running",
-            .{bind_address},
+            .{udp_address},
         ),
         else => |e| fatal("bind: {t}", .{e}),
     };
+
+    defer udp_socket.close(io);
 
     // Used for all of the `Server`-related persistent allocations
     var server_arena: heap.ArenaAllocator = .init(gpa);
@@ -35,85 +32,43 @@ pub fn bind(
     server.initAlloc(server_arena.allocator(), &per_message_arena, csprng, concurrent_sessions) catch
         fatal("failed to allocate server instance for {d} sessions slots", .{concurrent_sessions});
 
-    var server_pollfd: posix.pollfd = .{
-        .fd = server_fd,
-        .events = posix.POLL.IN,
-        .revents = 0,
-    };
-
     var buffer: [kcp.mtu]u8 = undefined;
 
-    recvmsg: while (!cancelation.cancelRequested()) {
-        var iov: [1]posix.iovec = .{.{
-            .base = &buffer,
-            .len = @intCast(buffer.len),
-        }};
-
-        var name: posix.Sockaddr = .{ .in = std.mem.zeroes(posix.Sockaddr.In) };
-
-        var header: posix.msghdr = .{
-            .name = name.rawMut(),
-            .namelen = @sizeOf(posix.Sockaddr.In),
-            .iov = (&iov)[0..1],
-            .iovlen = 1,
-            .control = null,
-            .controllen = 0,
-            .flags = 0,
-        };
-
-        const n_recv = posix.recvmsg(server_fd, &header, 0) catch |recvmsg_err| switch (recvmsg_err) {
+    recv_loop: while (true) { // TODO: integrate with graceful shutdown
+        const udp_message = udp_socket.receive(io, &buffer) catch |err| switch (err) {
             // The size of packet was greater than `mtu`,
             // this should not happen for well-behaved clients.
-            error.MessageOversize => continue :recvmsg,
-
-            error.WouldBlock => poll: while (!cancelation.cancelRequested()) {
-                // Poll until it becomes readable.
-                _ = posix.poll((&server_pollfd)[0..1], -1) catch |poll_err| switch (poll_err) {
-                    error.Interrupted => continue :poll,
-                    else => |e| {
-                        log.err("poll: {t}", .{e});
-                        continue :poll;
-                    },
-                };
-
-                if ((server_pollfd.revents & posix.POLL.IN) != 0)
-                    continue :recvmsg;
-            } else {
-                // Canceled.
-                break :recvmsg;
-            },
+            error.MessageOversize => continue :recv_loop,
 
             else => |e| {
                 log.err("UDP packet receive failed: {t}", .{e});
-                continue :recvmsg;
+                continue :recv_loop;
             },
         };
 
-        const current_time = posix.clock_gettime(.REALTIME) catch |err| switch (err) {
-            error.UnsupportedClock => std.mem.zeroes(posix.timespec),
-        };
+        const current_time: Io.Timestamp = .now(io, .real);
 
-        if (n_recv == kcp.Control.size) {
+        if (udp_message.data.len == kcp.Control.size) {
             var out_buf: ?[kcp.Control.size]u8 = null;
             server.receiveControlPacket(
-                &name,
+                &udp_message.from,
                 .{ .buffer = buffer[0..kcp.Control.size] },
                 &out_buf,
             );
 
             if (out_buf) |*send_buf|
-                sendMessage(cancelation, server_fd, &name, send_buf) catch |err| switch (err) {
-                    error.Interrupted => break :recvmsg, // The cancelation was requested.
+                udp_socket.send(io, &udp_message.from, send_buf) catch |err| switch (err) {
+                    error.Canceled => |e| return e,
                     else => {},
                 };
 
             continue;
-        } else if (n_recv < kcp.Header.size) continue;
+        } else if (udp_message.data.len < kcp.Header.size) continue;
 
         const status = server.receiveKcpPacket(
             current_time,
-            &name,
-            buffer[0..n_recv],
+            &udp_message.from,
+            udp_message.data,
         ) catch |recv_err| switch (recv_err) {
             error.InvalidToken => {
                 // This may happen if server has been restarted, but the game
@@ -122,8 +77,8 @@ pub fn bind(
                 var ctl: [kcp.Control.size]u8 = undefined;
 
                 kcp.Control.encode(&ctl, .disconnect, kcp_header.conv_id, kcp_header.token, 404);
-                sendMessage(cancelation, server_fd, &name, &ctl) catch |send_err| switch (send_err) {
-                    error.Interrupted => break :recvmsg, // The cancelation was requested.
+                udp_socket.send(io, &udp_message.from, &ctl) catch |send_err| switch (send_err) {
+                    error.Canceled => |e| return e,
                     else => {},
                 };
 
@@ -156,15 +111,15 @@ pub fn bind(
                     &response_string_buffer,
                 ) catch |err| switch (err) {
                     error.RandKeyDecryptFail => |e| {
-                        log.err("failed to authenticate client from {f}: {t}", .{ name, e });
+                        log.err("failed to authenticate client from {f}: {t}", .{ udp_message.from, e });
                         continue;
                     },
                 };
 
                 server.onAuthSucceeded(
                     server_arena.allocator(),
-                    &name,
-                    buffer[0..n_recv],
+                    &udp_message.from,
+                    udp_message.data,
                     input.header.conv_id,
                     input.token,
                     current_time,
@@ -181,14 +136,14 @@ pub fn bind(
         }
 
         while (server.output.pop()) |index| drainOutgoingPackets(
-            cancelation,
-            server_fd,
+            io,
+            udp_socket,
             current_time,
             &server.multi_conversation,
             index,
-            &name,
+            &udp_message.from,
         ) catch |err| switch (err) {
-            error.Interrupted => break :recvmsg, // The cancelation was requested.
+            error.Canceled => break :recv_loop, // The cancelation was requested.
             else => {},
         };
     }
@@ -196,15 +151,13 @@ pub fn bind(
     log.info("shutting down...", .{});
 
     if (rmpb.features.isAvailable(.player_kick)) {
-        const current_time = posix.clock_gettime(.REALTIME) catch |err| switch (err) {
-            error.UnsupportedClock => std.mem.zeroes(posix.timespec),
-        };
+        const current_time: Io.Timestamp = .now(io, .real);
 
         for (server.conv_map.values()) |client_index| {
             notifyPlayerKick(
-                .uncancelable, // We've already acknowledged cancelation.
+                io,
+                udp_socket,
                 &server,
-                server_fd,
                 current_time,
                 client_index,
                 .PlayerKickReason_ServerClose,
@@ -215,10 +168,10 @@ pub fn bind(
 
 /// Sends `PlayerKickScNotify` followed by disconnection control packet.
 fn notifyPlayerKick(
-    cancelation: *const Cancelation,
+    io: Io,
+    udp_socket: net.Socket,
     server: *Server,
-    server_fd: posix.socket_t,
-    current_time: posix.timespec,
+    current_time: Io.Timestamp,
     index: u32,
     reason: rmpb.main.PlayerKickReason,
 ) !void {
@@ -233,8 +186,8 @@ fn notifyPlayerKick(
     );
 
     try drainOutgoingPackets(
-        cancelation,
-        server_fd,
+        io,
+        udp_socket,
         current_time,
         &server.multi_conversation,
         index,
@@ -250,23 +203,16 @@ fn notifyPlayerKick(
         404,
     );
 
-    try sendMessage(
-        cancelation,
-        server_fd,
-        &server.cvars.addrs[index],
-        &ctl,
-    );
+    try udp_socket.send(io, &server.cvars.addrs[index], &ctl);
 }
 
-/// Sends all of the pending packets for the session at `index`
-/// Returns `error.Interrupted` if cancelation was requested.
 fn drainOutgoingPackets(
-    cancelation: *const Cancelation,
-    server_fd: posix.socket_t,
-    current_time: posix.timespec,
+    io: Io,
+    udp_socket: net.Socket,
+    current_time: Io.Timestamp,
     multi_conversation: *kcp.MultiConversation,
     index: u32,
-    destination: *const posix.Sockaddr,
+    destination: *const net.IpAddress,
 ) !void {
     multi_conversation.updateAt(index, current_time);
 
@@ -277,64 +223,8 @@ fn drainOutgoingPackets(
         const n_send = multi_conversation.drainAt(index, &it, &output_buf);
         if (n_send == 0) continue;
 
-        try sendMessage(cancelation, server_fd, destination, output_buf[0..n_send]);
+        try udp_socket.send(io, destination, output_buf[0..n_send]);
     }
-}
-
-/// Sends the message.
-/// Returns `error.Interrupted` if cancelation was requested.
-/// Blocks in case the OS send buffer is full (subject to cancelation)
-fn sendMessage(
-    cancelation: *const Cancelation,
-    server_fd: posix.socket_t,
-    to: *const posix.Sockaddr,
-    data: []const u8,
-) (posix.SendmsgError || error{Interrupted})!void {
-    const header: posix.msghdr_const = .{
-        .name = to.raw(),
-        .namelen = to.len(),
-        .iov = &.{.{
-            .base = data.ptr,
-            .len = @intCast(data.len),
-        }},
-        .iovlen = 1,
-        .control = null,
-        .controllen = 0,
-        .flags = 0,
-    };
-
-    sendmsg: while (true) if (posix.sendmsg(server_fd, &header, 0)) |_| {
-        break :sendmsg;
-    } else |sendmsg_err| switch (sendmsg_err) {
-        error.WouldBlock => {
-            // Poll until it becomes writable.
-            // In case of connectionless sockets, OS buffer will be drained quickly
-            // so there's no need to worry about blocking behavior here.
-
-            var pollfd: posix.pollfd = .{
-                .fd = server_fd,
-                .events = posix.POLL.OUT,
-                .revents = 0,
-            };
-
-            poll: while (!cancelation.cancelRequested()) {
-                _ = posix.poll((&pollfd)[0..1], -1) catch |poll_err| switch (poll_err) {
-                    error.Interrupted => continue :poll,
-                    else => |e| {
-                        log.err("poll: {t}", .{e});
-                        continue :poll;
-                    },
-                };
-
-                if ((pollfd.revents & posix.POLL.OUT) != 0)
-                    continue :sendmsg;
-            } else {
-                // Canceled.
-                return error.Interrupted;
-            }
-        },
-        else => |e| return e,
-    };
 }
 
 fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
@@ -342,12 +232,12 @@ fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
     std.process.exit(1);
 }
 
+const Io = std.Io;
 const Random = std.Random;
 const Allocator = std.mem.Allocator;
-const Cancelation = rmio.Cancelation;
 
-const posix = rmio.posix;
 const heap = std.heap;
+const net = std.Io.net;
 
 const kcp = @import("kcp.zig");
 const Server = @import("Server.zig");

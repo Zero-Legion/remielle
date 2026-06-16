@@ -73,18 +73,12 @@ pub const Timeval = packed struct {
 
     pub const zero: Timeval = .{ .milliseconds = 0 };
 
-    pub fn fromTimespec(spec: posix.timespec) Timeval {
-        return .{ .milliseconds = @truncate(@as(u64, @bitCast(posix.timespecToMs(spec)))) };
-    }
-
-    pub fn toTimespec(tv: Timeval) posix.timespec {
-        return posix.msToTimespec(tv.milliseconds);
+    pub fn fromTimestamp(t: Io.Timestamp) Timeval {
+        return .{ .milliseconds = @truncate(@as(u64, @bitCast(t.toMilliseconds()))) };
     }
 };
 
 const Io = std.Io;
-
-const posix = rmio.posix;
 
 const rmio = @import("rmio");
 const std = @import("std");

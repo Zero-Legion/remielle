@@ -252,7 +252,7 @@ pub fn create(
     arena: Allocator,
     conv_id: kcp.ConvId,
     token: kcp.Token,
-    start_time: posix.timespec,
+    start_time: Io.Timestamp,
 ) Allocator.Error!Storage.OptionalIndex {
     const index = switch (mc.free.head) {
         .none => return .none,
@@ -280,7 +280,7 @@ pub fn create(
     mc.storage.ids[index] = conv_id;
     mc.storage.tokens[index] = token;
 
-    mc.storage.start_time[index] = .fromTimespec(start_time);
+    mc.storage.start_time[index] = .fromTimestamp(start_time);
     mc.storage.last_update[index] = .zero;
 
     mc.storage.rx_rttval[index] = 0;
@@ -694,9 +694,9 @@ pub fn drainAt(mc: *MultiConversation, client: u32, it: *DrainIterator, output: 
     return bw.end;
 }
 
-pub fn updateAt(mc: *MultiConversation, client: u32, current_time: posix.timespec) void {
+pub fn updateAt(mc: *MultiConversation, client: u32, current_time: Io.Timestamp) void {
     const start = mc.storage.start_time[client];
-    const current: kcp.Timeval = .fromTimespec(current_time);
+    const current: kcp.Timeval = .fromTimestamp(current_time);
 
     mc.storage.last_update[client].milliseconds = current.milliseconds -| start.milliseconds;
     const ring = &mc.storage.rings[client].send;
@@ -710,7 +710,6 @@ const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const SinglyLinkedList = std.SinglyLinkedList;
 
-const posix = rmio.posix;
 const heap = std.heap;
 const debug = std.debug;
 

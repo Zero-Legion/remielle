@@ -12,7 +12,7 @@ per_message_arena: *heap.ArenaAllocator,
 
 pub const Frame = struct {
     target_index: u32,
-    time: posix.timespec,
+    time: Io.Timestamp,
     cvars: *ClientVariables,
     multi_conversation: *kcp.MultiConversation,
 
@@ -44,7 +44,7 @@ pub fn initAlloc(
 
 pub fn receiveControlPacket(
     server: *Server,
-    from: *const posix.Sockaddr,
+    from: *const net.IpAddress,
     ctl: kcp.Control,
     out: *?[kcp.Control.size]u8,
 ) void {
@@ -54,7 +54,7 @@ pub fn receiveControlPacket(
             const token: kcp.Token = .init(&.{
                 .random = server.conv_random,
                 .conv_id = conv_id,
-                .addr = @bitCast(from.in.addr),
+                .addr = @bitCast(from.ip4.bytes),
             });
 
             out.* = @as([kcp.Control.size]u8, undefined);
@@ -65,7 +65,7 @@ pub fn receiveControlPacket(
             const token: kcp.Token = .init(&.{
                 .random = server.conv_random,
                 .conv_id = conv_id,
-                .addr = @bitCast(from.in.addr),
+                .addr = @bitCast(from.ip4.bytes),
             });
 
             if (!ctl.isToken(token)) return;
@@ -85,11 +85,11 @@ pub fn onAuthSucceeded(
     /// Used for allocation of per-client ring buffers.
     /// The allocation will be recycled.
     arena: Allocator,
-    from: *const posix.Sockaddr,
+    from: *const net.IpAddress,
     first_packet: []u8,
     conv_id: kcp.ConvId,
     token: kcp.Token,
-    current_time: posix.timespec,
+    current_time: Io.Timestamp,
     key: messaging.Xorpad.Key,
     auth_response: rmpb.main.PlayerGetTokenScRsp,
 ) !void {
@@ -131,8 +131,8 @@ pub const ReceiveStatus = union(enum) {
 
 pub fn receiveKcpPacket(
     server: *Server,
-    time: posix.timespec,
-    from: *const posix.Sockaddr,
+    time: Io.Timestamp,
+    from: *const net.IpAddress,
     buffer: []u8,
 ) !ReceiveStatus {
     const kcp_header = kcp.Header.decode(buffer[0..kcp.Header.size]) catch
@@ -146,7 +146,7 @@ pub fn receiveKcpPacket(
 
     const token = kcp_header.token.upgrade(
         server.conv_random,
-        @bitCast(from.in.addr),
+        @bitCast(from.ip4.bytes),
         kcp_header.conv_id,
     ) orelse return error.InvalidToken;
 
@@ -185,7 +185,7 @@ pub fn receiveKcpPacket(
 fn initAt(
     server: *Server,
     index: u32,
-    addr: posix.Sockaddr,
+    addr: net.IpAddress,
     key: messaging.Xorpad.Key,
 ) void {
     server.output.addUnchecked(index);
@@ -213,13 +213,13 @@ fn release(server: *Server, id: kcp.ConvId) bool {
 pub const ClientVariables = struct {
     packet_counters: []PacketCounter,
     xorpads: []messaging.Xorpad,
-    addrs: []posix.Sockaddr,
+    addrs: []net.IpAddress,
     properties: logic.Properties,
 
     fn initAlloc(uninit: *ClientVariables, arena: Allocator, slots: usize) Allocator.Error!void {
         uninit.packet_counters = try arena.alloc(PacketCounter, slots);
         uninit.xorpads = try arena.alloc(messaging.Xorpad, slots);
-        uninit.addrs = try arena.alloc(posix.Sockaddr, slots);
+        uninit.addrs = try arena.alloc(net.IpAddress, slots);
         try uninit.properties.initAlloc(arena, slots);
     }
 };
@@ -290,11 +290,12 @@ const OutputList = struct {
     };
 };
 
+const Io = std.Io;
 const Random = std.Random;
 const Allocator = std.mem.Allocator;
 
 const heap = std.heap;
-const posix = rmio.posix;
+const net = std.Io.net;
 const array_hash_map = std.array_hash_map;
 
 const kcp = @import("kcp.zig");
