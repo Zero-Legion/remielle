@@ -37,7 +37,7 @@ pub fn main(init: Init.Minimal) void {
         fatal("bad bind address specified: {t}", .{err});
 
     var io_impl = if (rmio.RemiellIo.supported)
-        rmio.RemiellIo.init(gpa, .{ .coroutine_limit = .unlimited, .stack_size = 1024 * 32 }) catch |err|
+        rmio.RemiellIo.init(gpa, .{ .coroutine_limit = .unlimited, .stack_size = 1024 * 128 }) catch |err|
             fatal("failed to init I/O implementation: {t}", .{err})
     else
         std.Io.Threaded.init(gpa, .{});
@@ -56,9 +56,24 @@ pub fn main(init: Init.Minimal) void {
     var csprng_impl: DefaultCsprng = .init(csprng_seed);
     const csprng = csprng_impl.random();
 
-    app.bind(io, gpa, csprng, &bind_address, options.concurrent_sessions) catch |err| switch (err) {
-        error.Canceled => unreachable,
+    const bind_args = .{ io, gpa, csprng, &bind_address, options.concurrent_sessions };
+
+    var app_future = io.concurrent(app.bind, bind_args) catch |concurrent_err| switch (concurrent_err) {
+        error.ConcurrencyUnavailable => {
+            @call(.auto, app.bind, bind_args) catch |err| switch (err) {
+                error.Canceled => unreachable,
+            };
+
+            return;
+        },
     };
+
+    if (rmio.RemiellIo.supported) {
+        io_impl.waitForShutdown();
+        app_future.cancel(io) catch {};
+    } else {
+        app_future.await(io) catch {};
+    }
 }
 
 inline fn fatal(comptime fmt: []const u8, args: anytype) noreturn {

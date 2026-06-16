@@ -34,11 +34,13 @@ pub fn bind(
 
     var buffer: [kcp.mtu]u8 = undefined;
 
-    recv_loop: while (true) { // TODO: integrate with graceful shutdown
+    recv_loop: while (true) {
         const udp_message = udp_socket.receive(io, &buffer) catch |err| switch (err) {
             // The size of packet was greater than `mtu`,
             // this should not happen for well-behaved clients.
             error.MessageOversize => continue :recv_loop,
+
+            error.Canceled => break :recv_loop,
 
             else => |e| {
                 log.err("UDP packet receive failed: {t}", .{e});
