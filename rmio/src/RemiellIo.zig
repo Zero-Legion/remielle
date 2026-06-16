@@ -1,7 +1,7 @@
 impl: Impl,
 arena: std.heap.ArenaAllocator,
 coro_storage: Coroutine.Storage,
-current_coro: Coroutine.OptionalIndex,
+current_coro: ?*Coroutine,
 naked_wait: WaitPoint,
 csprng: ?DefaultCsprng,
 
@@ -20,7 +20,7 @@ pub const supported = switch (native_os) {
 };
 
 pub const InitOptions = struct {
-    coroutines: u32,
+    coroutine_limit: Io.Limit,
     stack_size: usize,
 };
 
@@ -42,17 +42,14 @@ const WaitPoint = struct {
             cancelation: Operation.Storage.Tagged,
         },
         /// The coroutine is waiting for another coroutine to exit.
-        coroutine: struct {
-            /// Index into `Coroutine.Storage.items`
-            index: u32,
-        },
+        coroutine: *Coroutine,
 
-        pub fn ready(awaitee: *const Awaitee, rio: *RemiellIo) bool {
+        pub fn ready(awaitee: *const Awaitee) bool {
             return switch (awaitee.*) {
                 .none => true,
                 .idle => false,
                 .operation => |operation| operation.outstanding == 0,
-                .coroutine => |child| rio.coro_storage.items[child.index].state == .finished,
+                .coroutine => |child| child.state == .finished,
             };
         }
     };
@@ -83,17 +80,11 @@ pub const InitError = error{
 } || Allocator.Error || Io.UnexpectedError;
 
 pub fn init(gpa: Allocator, options: InitOptions) InitError!RemiellIo {
-    var arena: std.heap.ArenaAllocator = .init(gpa);
-    errdefer arena.deinit();
-
-    const coroutines = try arena.allocator().alloc(Coroutine, options.coroutines);
-    const storage: Coroutine.Storage = try .init(coroutines, options.stack_size, arena.allocator());
-
     return .{
         .impl = try .init(),
-        .arena = arena,
-        .coro_storage = storage,
-        .current_coro = .none,
+        .arena = .init(gpa),
+        .coro_storage = .init(options.coroutine_limit, options.stack_size),
+        .current_coro = null,
         .naked_wait = .{ .awaitee = .none, .context = undefined },
         .csprng = null,
     };
@@ -106,12 +97,20 @@ pub fn deinit(rio: *RemiellIo) void {
 
 const Coroutine = struct {
     buffer: []u8,
-    start: *const fn (context: *const anyopaque, result: *anyopaque) void,
-    result_ptr: *anyopaque,
+    scheduling: union(enum) {
+        awaitable: struct {
+            start: *const fn (context: *const anyopaque, result: *anyopaque) void,
+            result_ptr: *anyopaque,
+        },
+        grouped: struct {
+            start: *const fn (context: *const anyopaque) void,
+            group_ptr: *Io.Group,
+        },
+    },
     context_ptr: *const anyopaque,
     state: State,
     cancel_protection: Io.CancelProtection,
-    list_node: OptionalIndex,
+    list_node: SinglyLinkedList.Node,
     wait_point: WaitPoint,
     rio: *RemiellIo,
     awaiter: ?Awaiter,
@@ -129,57 +128,114 @@ const Coroutine = struct {
     };
 
     const Storage = struct {
-        items: []Coroutine,
-        // Unused coroutine slots.
-        free_list_head: OptionalIndex,
-        // Queued to run coroutines on the next yield.
-        queued_list_head: OptionalIndex,
+        limit: Io.Limit,
+        stack_size: usize,
+        free_list: SinglyLinkedList,
+        /// Queued to run on the next yield.
+        queued_list: SinglyLinkedList,
 
-        pub fn init(
-            items: []Coroutine,
-            stack_size: usize,
-            stack_allocator: Allocator,
-        ) Allocator.Error!Storage {
-            for (items[0 .. items.len - 1], 1..) |*item, i| {
-                item.list_node = @enumFromInt(i);
-                item.buffer = try stack_allocator.alloc(u8, stack_size);
-            }
-
-            items[items.len - 1].list_node = .none;
-            items[items.len - 1].buffer = try stack_allocator.alloc(u8, stack_size);
-
+        pub fn init(limit: Io.Limit, stack_size: usize) Storage {
             return .{
-                .items = items,
-                .free_list_head = @enumFromInt(0),
-                .queued_list_head = .none,
+                .limit = limit,
+                .stack_size = stack_size,
+                .free_list = .{},
+                .queued_list = .{},
             };
         }
 
+        pub const AllocateError = Allocator.Error || error{LimitExceeded};
+
+        pub fn allocate(coro_storage: *Storage, arena: Allocator) AllocateError!*Coroutine {
+            if (coro_storage.free_list.popFirst()) |node|
+                return @alignCast(@fieldParentPtr("list_node", node));
+
+            coro_storage.limit = coro_storage.limit.subtract(1) orelse
+                return error.LimitExceeded;
+
+            // TODO: allocate Coroutine.buffer together, as trailing data
+            const coro = try arena.create(Coroutine);
+            coro.buffer = try arena.alloc(u8, coro_storage.stack_size);
+
+            return coro;
+        }
+
         pub fn schedule(coro_storage: *Storage, coro: *Coroutine) void {
-            coro.list_node = coro_storage.queued_list_head;
-            coro_storage.queued_list_head = @enumFromInt(coro_storage.indexOf(coro));
+            coro_storage.queued_list.prepend(&coro.list_node);
         }
 
         pub fn recycle(coro_storage: *Storage, coro: *Coroutine) void {
-            coro.list_node = coro_storage.queued_list_head;
-            coro_storage.free_list_head = @enumFromInt(coro_storage.indexOf(coro));
-        }
-
-        pub fn indexOf(coro_storage: *Storage, coro: *const Coroutine) u32 {
-            return @intCast(@divExact(
-                @intFromPtr(coro) - @intFromPtr(coro_storage.items.ptr),
-                @sizeOf(Coroutine),
-            ));
+            coro_storage.free_list.prepend(&coro.list_node);
         }
     };
 
-    const OptionalIndex = enum(u32) {
-        none = std.math.maxInt(u32),
-        _,
+    const startup = struct {
+        fn entry() callconv(.naked) void {
+            switch (builtin.cpu.arch) {
+                .x86_64 => switch (native_os) {
+                    .windows => asm volatile (
+                        \\ subq $40, %%rsp
+                        \\ movq 40(%%rsp), %%rcx
+                        \\ jmp %[call:P]
+                        :
+                        : [call] "X" (&call),
+                    ),
+                    else => asm volatile (
+                        \\ subq $40, %%rsp
+                        \\ movq 40(%%rsp), %%rdi
+                        \\ jmp %[call:P]
+                        :
+                        : [call] "X" (&call),
+                    ),
+                },
+                else => |arch| @compileError("unimplemented architecture: " ++ @tagName(arch)),
+            }
+        }
 
-        fn toInt(oi: OptionalIndex) u32 {
-            debug.assert(oi != .none);
-            return @intFromEnum(oi);
+        fn call(coro: *Coroutine) callconv(.c) noreturn {
+            const rio = coro.rio;
+
+            switch (coro.scheduling) {
+                .awaitable => |awaitable| {
+                    awaitable.start(coro.context_ptr, awaitable.result_ptr);
+                },
+                .grouped => |grouped| {
+                    grouped.start(coro.context_ptr);
+
+                    // Done. We can recycle self immediately.
+
+                    const next_group_coro: ?*Coroutine = if (coro.list_node.next) |node|
+                        @alignCast(@fieldParentPtr("list_node", node))
+                    else
+                        null;
+
+                    coro.list_node.next = null;
+                    grouped.group_ptr.token.store(next_group_coro, .monotonic);
+
+                    rio.coro_storage.recycle(coro);
+                },
+            }
+
+            coro.state = .finished;
+
+            if (coro.awaiter) |awaiter| {
+                const awaiter_context = context: switch (awaiter) {
+                    .naked => {
+                        rio.current_coro = null;
+                        break :context &rio.naked_wait.context;
+                    },
+                    .coroutine => |other| {
+                        rio.current_coro = other;
+                        break :context &other.wait_point.context;
+                    },
+                };
+
+                _ = Io.fiber.contextSwitch(&.{
+                    .old = &coro.wait_point.context,
+                    .new = awaiter_context,
+                });
+            } else rio.block(.idle);
+
+            unreachable;
         }
     };
 };
@@ -189,6 +245,8 @@ const vtable: Io.VTable = vtable: {
 
     v.operate = operate;
     v.concurrent = concurrent;
+    v.groupConcurrent = groupConcurrent;
+    v.groupCancel = groupCancel;
     v.cancel = cancel;
     v.recancel = recancel;
     v.checkCancel = checkCancelErased;
@@ -256,66 +314,13 @@ fn concurrent(
     context_alignment: std.mem.Alignment,
     start: *const fn (context: *const anyopaque, result: *anyopaque) void,
 ) Io.ConcurrentError!*Io.AnyFuture {
-    const inner = struct {
-        fn entry() callconv(.naked) void {
-            switch (builtin.cpu.arch) {
-                .x86_64 => switch (native_os) {
-                    .windows => asm volatile (
-                        \\ subq $40, %%rsp
-                        \\ movq 40(%%rsp), %%rcx
-                        \\ jmp %[call:P]
-                        :
-                        : [call] "X" (&call),
-                    ),
-                    else => asm volatile (
-                        \\ subq $40, %%rsp
-                        \\ movq 40(%%rsp), %%rdi
-                        \\ jmp %[call:P]
-                        :
-                        : [call] "X" (&call),
-                    ),
-                },
-                else => |arch| @compileError("unimplemented architecture: " ++ @tagName(arch)),
-            }
-        }
-
-        fn call(coro: *Coroutine) callconv(.c) noreturn {
-            coro.start(coro.context_ptr, coro.result_ptr);
-            coro.state = .finished;
-            const rio = coro.rio;
-
-            if (coro.awaiter) |awaiter| {
-                const awaiter_context = context: switch (awaiter) {
-                    .naked => {
-                        rio.current_coro = .none;
-                        break :context &rio.naked_wait.context;
-                    },
-                    .coroutine => |other| {
-                        rio.current_coro = @enumFromInt(rio.coro_storage.indexOf(other));
-                        break :context &other.wait_point.context;
-                    },
-                };
-
-                _ = Io.fiber.contextSwitch(&.{
-                    .old = &coro.wait_point.context,
-                    .new = awaiter_context,
-                });
-            } else rio.block(.idle);
-
-            unreachable;
-        }
-    };
-
     const rio: *RemiellIo = @ptrCast(@alignCast(userdata));
 
-    const coro_index = switch (rio.coro_storage.free_list_head) {
-        .none => return error.ConcurrencyUnavailable,
-        _ => |index| index.toInt(),
+    const coro = rio.coro_storage.allocate(rio.arena.allocator()) catch |err| switch (err) {
+        error.OutOfMemory, error.LimitExceeded => return error.ConcurrencyUnavailable,
     };
 
-    const coro = &rio.coro_storage.items[coro_index];
-    rio.coro_storage.free_list_head = coro.list_node;
-    coro.list_node = .none;
+    errdefer rio.coro_storage.recycle(coro);
 
     const buf_aligned = result_alignment.forward(@intFromPtr(coro.buffer.ptr));
     const owned_context_ptr: [*]u8 = @ptrFromInt(context_alignment.forward(buf_aligned + result_len));
@@ -334,8 +339,11 @@ fn concurrent(
     if (@intFromPtr(stack_start) - @intFromPtr(coro.buffer.ptr) > coro.buffer.len)
         return error.ConcurrencyUnavailable;
 
-    coro.start = start;
-    coro.result_ptr = @ptrFromInt(buf_aligned);
+    coro.scheduling = .{ .awaitable = .{
+        .start = start,
+        .result_ptr = @ptrFromInt(buf_aligned),
+    } };
+
     coro.context_ptr = owned_context_ptr;
     coro.state = .running;
     coro.cancel_protection = .unblocked;
@@ -344,7 +352,7 @@ fn concurrent(
 
     coro.wait_point = .{ .awaitee = .none, .context = .{
         .rsp = @intFromPtr(stack_pointer),
-        .rip = @intFromPtr(&inner.entry),
+        .rip = @intFromPtr(&Coroutine.startup.entry),
         .rbp = 0,
     } };
 
@@ -370,12 +378,10 @@ fn cancel(
         .running => {
             coroutine.state = .cancel_requested;
 
-            coroutine.awaiter = switch (rio.current_coro) {
-                .none => .{ .naked = &rio.naked_wait.context },
-                _ => |index| .{ .coroutine = &rio.coro_storage.items[index.toInt()] },
-            };
-
-            const cancel_index: Coroutine.OptionalIndex = @enumFromInt(rio.coro_storage.indexOf(coroutine));
+            coroutine.awaiter = if (rio.current_coro) |current|
+                .{ .coroutine = current }
+            else
+                .{ .naked = &rio.naked_wait.context };
 
             switch (coroutine.wait_point.awaitee) {
                 .operation => |*o| {
@@ -389,31 +395,128 @@ fn cancel(
                 else => {},
             }
 
-            rio.block(.{ .await = cancel_index.toInt() });
+            rio.block(.{ .await = coroutine });
         },
         .finished => {}, // Nothing to do
         .cancel_requested, .cancel_acknowledged => unreachable, // always a race condition
     }
 
     rio.coro_storage.recycle(coroutine);
-    @memcpy(result, @as([*]u8, @ptrCast(coroutine.result_ptr))[0..result.len]);
+    @memcpy(result, @as([*]u8, @ptrCast(coroutine.scheduling.awaitable.result_ptr))[0..result.len]);
+}
+
+fn groupConcurrent(
+    userdata: ?*anyopaque,
+    g: *Io.Group,
+    context: []const u8,
+    context_alignment: std.mem.Alignment,
+    start: *const fn (*const anyopaque) void,
+) Io.ConcurrentError!void {
+    const rio: *RemiellIo = @ptrCast(@alignCast(userdata));
+
+    const coro = rio.coro_storage.allocate(rio.arena.allocator()) catch |err| switch (err) {
+        error.OutOfMemory, error.LimitExceeded => return error.ConcurrencyUnavailable,
+    };
+
+    errdefer rio.coro_storage.recycle(coro);
+
+    const owned_context_ptr: [*]u8 = @ptrFromInt(context_alignment.forward(@intFromPtr(coro.buffer.ptr)));
+
+    // The bare minimum of buffer size. Of course, we'll also need some for the stack itself.
+    const aligned_end = @intFromPtr(owned_context_ptr) + context.len;
+
+    // This is where actual coroutine stack starts.
+    const stack_start: [*]u8 = @ptrFromInt(std.mem.alignForward(usize, aligned_end, 16));
+    const stack_pointer: [*]u8 = @ptrFromInt(std.mem.alignBackward(
+        usize,
+        @intFromPtr(coro.buffer.ptr) + coro.buffer.len - 8,
+        16,
+    ));
+
+    if (@intFromPtr(stack_start) - @intFromPtr(coro.buffer.ptr) > coro.buffer.len)
+        return error.ConcurrencyUnavailable;
+
+    coro.scheduling = .{ .grouped = .{
+        .start = start,
+        .group_ptr = g,
+    } };
+
+    coro.context_ptr = owned_context_ptr;
+    coro.state = .running;
+    coro.cancel_protection = .unblocked;
+    coro.rio = rio;
+    coro.awaiter = null;
+
+    coro.wait_point = .{ .awaitee = .none, .context = .{
+        .rsp = @intFromPtr(stack_pointer),
+        .rip = @intFromPtr(&Coroutine.startup.entry),
+        .rbp = 0,
+    } };
+
+    @memcpy(owned_context_ptr[0..context.len], context);
+    @memcpy(stack_pointer[0..8], std.mem.asBytes(&coro));
+
+    rio.coro_storage.schedule(coro);
+
+    if (g.token.load(.monotonic)) |token| {
+        const last_group_coro: *Coroutine = @ptrCast(@alignCast(token));
+        coro.list_node.next = &last_group_coro.list_node;
+        g.token.store(coro, .monotonic);
+    } else {
+        coro.list_node.next = null;
+        g.token.store(coro, .monotonic);
+    }
+}
+
+fn groupCancel(
+    userdata: ?*anyopaque,
+    g: *Io.Group,
+    _: *anyopaque,
+) void {
+    const rio: *RemiellIo = @ptrCast(@alignCast(userdata));
+
+    while (g.token.raw) |token| {
+        const coroutine: *Coroutine = @ptrCast(@alignCast(token));
+        switch (coroutine.state) {
+            .running => {
+                coroutine.state = .cancel_requested;
+
+                coroutine.awaiter = if (rio.current_coro) |current|
+                    .{ .coroutine = current }
+                else
+                    .{ .naked = &rio.naked_wait.context };
+
+                switch (coroutine.wait_point.awaitee) {
+                    .operation => |*o| {
+                        o.outstanding += 1;
+                        o.cancelation.storage = .init(.{ .cancel = .{
+                            .operation = &o.primary.storage,
+                        } });
+
+                        rio.impl.submissions.append(&o.cancelation.storage.submission.node);
+                    },
+                    else => {},
+                }
+
+                rio.block(.{ .await = coroutine });
+            },
+            .finished => {}, // Nothing to do
+            .cancel_requested, .cancel_acknowledged => unreachable, // always a race condition
+        }
+    }
 }
 
 fn recancel(userdata: ?*anyopaque) void {
     const rio: *RemiellIo = @ptrCast(@alignCast(userdata));
 
-    switch (rio.current_coro) {
+    const coro = rio.current_coro orelse
         // This is unreachable because first of all main frame cannot be canceled,
         // second of all, recancel() may only be called to re-arm cancelation request
-        .none => unreachable,
+        unreachable;
 
-        _ => |index| {
-            const coro = &rio.coro_storage.items[index.toInt()];
-            switch (coro.state) {
-                .running, .finished, .cancel_requested => unreachable,
-                .cancel_acknowledged => coro.state = .cancel_requested,
-            }
-        },
+    switch (coro.state) {
+        .running, .finished, .cancel_requested => unreachable,
+        .cancel_acknowledged => coro.state = .cancel_requested,
     }
 }
 
@@ -671,31 +774,26 @@ fn checkCancelErased(userdata: ?*anyopaque) Io.Cancelable!void {
 }
 
 fn checkCancel(rio: *RemiellIo) Io.Cancelable!void {
-    switch (rio.current_coro) {
-        .none => return,
-        _ => |index| {
-            const coro = &rio.coro_storage.items[index.toInt()];
-            switch (coro.state) {
-                .cancel_requested => switch (coro.cancel_protection) {
-                    .blocked => {},
-                    .unblocked => {
-                        coro.state = .cancel_acknowledged;
-                        return error.Canceled;
-                    },
-                },
-                .cancel_acknowledged, .running => {},
-                .finished => unreachable,
-            }
+    const coro = rio.current_coro orelse return;
+
+    switch (coro.state) {
+        .cancel_requested => switch (coro.cancel_protection) {
+            .blocked => {},
+            .unblocked => {
+                coro.state = .cancel_acknowledged;
+                return error.Canceled;
+            },
         },
+        .cancel_acknowledged, .running => {},
+        .finished => unreachable,
     }
 }
 
 fn unblock(rio: *RemiellIo, result: anytype) @TypeOf(result) {
     _ = result catch |err| switch (err) {
         error.Canceled => {
-            const coro = &rio.coro_storage.items[rio.current_coro.toInt()];
-            debug.assert(coro.state == .cancel_requested);
-            coro.state = .cancel_acknowledged;
+            debug.assert(rio.current_coro.?.state == .cancel_requested);
+            rio.current_coro.?.state = .cancel_acknowledged;
         },
         else => {},
     };
@@ -705,15 +803,11 @@ fn unblock(rio: *RemiellIo, result: anytype) @TypeOf(result) {
 
 fn swapCancelProtection(userdata: ?*anyopaque, protection: Io.CancelProtection) Io.CancelProtection {
     const rio: *RemiellIo = @ptrCast(@alignCast(userdata));
-    return switch (rio.current_coro) {
-        .none => .unblocked,
-        _ => |index| swap: {
-            const coro = &rio.coro_storage.items[index.toInt()];
-            const old_cancel_protection = coro.cancel_protection;
-            coro.cancel_protection = protection;
-            break :swap old_cancel_protection;
-        },
-    };
+    const coro = rio.current_coro orelse return .unblocked;
+
+    const old_cancel_protection = coro.cancel_protection;
+    coro.cancel_protection = protection;
+    return old_cancel_protection;
 }
 
 fn now(userdata: ?*anyopaque, clock: Io.Clock) Io.Timestamp {
@@ -726,23 +820,18 @@ fn now(userdata: ?*anyopaque, clock: Io.Clock) Io.Timestamp {
 }
 
 fn waitPoint(rio: *RemiellIo) *WaitPoint {
-    return switch (rio.current_coro) {
-        .none => &rio.naked_wait,
-        _ => |index| &rio.coro_storage.items[index.toInt()].wait_point,
-    };
+    const current = rio.current_coro orelse return &rio.naked_wait;
+    return &current.wait_point;
 }
 
 const WaitReason = union(enum) {
     idle,
     submission,
-    await: u32,
+    await: *Coroutine,
 };
 
 fn block(rio: *RemiellIo, reason: WaitReason) void {
-    const enter_wait_point = switch (rio.current_coro) {
-        .none => &rio.naked_wait,
-        _ => |index| &rio.coro_storage.items[index.toInt()].wait_point,
-    };
+    const enter_wait_point = rio.waitPoint();
 
     enter_wait_point.awaitee = switch (reason) {
         // Coroutine has finished execution
@@ -751,35 +840,22 @@ fn block(rio: *RemiellIo, reason: WaitReason) void {
         // A new operation submitted by coroutine.
         .submission => enter_wait_point.awaitee, // unchanged
 
-        .await => |coro_index| .{ .coroutine = .{
-            .index = coro_index,
-        } },
+        .await => |coro| .{ .coroutine = coro },
     };
 
-    wait_loop: while (!rio.waitPoint().awaitee.ready(rio)) {
-        while (true) {
-            switch (rio.coro_storage.queued_list_head) {
-                .none => break,
-                _ => |next_index| {
-                    const next_coro = &rio.coro_storage.items[next_index.toInt()];
-                    rio.coro_storage.queued_list_head = next_coro.list_node;
-                    next_coro.list_node = .none;
+    wait_loop: while (!rio.waitPoint().awaitee.ready()) {
+        while (rio.coro_storage.queued_list.popFirst()) |node| {
+            const next_coro: *Coroutine = @fieldParentPtr("list_node", node);
 
-                    const save_into = switch (rio.current_coro) {
-                        .none => &rio.naked_wait.context,
-                        _ => |index| &rio.coro_storage.items[index.toInt()].wait_point.context,
-                    };
+            const save_into = &rio.waitPoint().context;
+            rio.current_coro = next_coro;
 
-                    rio.current_coro = next_index;
+            _ = Io.fiber.contextSwitch(&.{
+                .old = save_into,
+                .new = &next_coro.wait_point.context,
+            });
 
-                    _ = Io.fiber.contextSwitch(&.{
-                        .old = save_into,
-                        .new = &next_coro.wait_point.context,
-                    });
-
-                    if (rio.waitPoint().awaitee.ready(rio)) break :wait_loop;
-                },
-            }
+            if (rio.waitPoint().awaitee.ready()) break :wait_loop;
         }
 
         _ = rio.impl.await() catch @panic("impl.await");
@@ -809,21 +885,12 @@ fn block(rio: *RemiellIo, reason: WaitReason) void {
             else
                 @fieldParentPtr("wait_point", wait_point);
 
-            const maybe_coro_index: Coroutine.OptionalIndex = if (maybe_coro) |coro|
-                @enumFromInt(rio.coro_storage.indexOf(coro))
-            else
-                .none;
-
-            if (maybe_coro_index == rio.current_coro) {
+            if (maybe_coro == rio.current_coro) {
                 break :wait_loop;
             }
 
-            const save_into = switch (rio.current_coro) {
-                .none => &rio.naked_wait.context,
-                _ => |index| &rio.coro_storage.items[index.toInt()].wait_point.context,
-            };
-
-            rio.current_coro = maybe_coro_index;
+            const save_into = &rio.waitPoint().context;
+            rio.current_coro = maybe_coro;
 
             _ = Io.fiber.contextSwitch(&.{
                 .old = save_into,
@@ -971,6 +1038,7 @@ const native_os = builtin.os.tag;
 
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
+const SinglyLinkedList = std.SinglyLinkedList;
 const DefaultCsprng = std.Random.DefaultCsprng;
 
 const net = std.Io.net;
