@@ -15,49 +15,42 @@ pub fn notifyLogicChanges(
         const Fn = @TypeOf(@field(ns, decl.name));
         const Args = std.meta.ArgsTuple(Fn);
 
-        var outputs: OutputsOf(Fn) = undefined;
-        comptime var outputs_i: u32 = 0;
+        var output: OutputOf(Fn) = .init(arena);
 
         var args: Args = undefined;
         var fulfilled_inputs: u32 = 0;
 
         inline for (@typeInfo(Args).@"struct".fields, &args) |arg_info, *arg| {
-            const Arg = arg_info.type;
-            const arg_type_info = @typeInfo(Arg);
-            const arg_kind = comptime std.meta.activeTag(arg_type_info);
-
-            if (arg_kind == .@"struct" and @hasDecl(Arg, "Change")) {
-                arg.* = .init(frame, changes);
-                fulfilled_inputs += @intFromBool(arg.anythingChanged());
-            } else if (arg_kind == .pointer and @hasDecl(arg_type_info.pointer.child, "Notify")) {
-                outputs[outputs_i] = .init(arena);
-                arg.* = &outputs[outputs_i];
-                outputs_i += 1;
-            } else @compileError("Invalid argument type: " ++ @typeName(Arg));
+            switch (arg_info.type) {
+                *OutputOf(Fn) => arg.* = &output,
+                else => |Arg| switch (@typeInfo(Arg)) {
+                    .@"struct" => if (@hasDecl(Arg, "Change")) {
+                        arg.* = .init(frame, changes);
+                        fulfilled_inputs += @intFromBool(arg.anythingChanged());
+                    } else @compileError("Invalid argument type: " ++ @typeName(Arg)),
+                    else => |kind| @compileError("Invalid argument kind: " ++ @tagName(kind)),
+                },
+            }
         }
 
-        if (fulfilled_inputs != 0) {
+        if (fulfilled_inputs != 0) call: {
             @call(.auto, @field(ns, decl.name), args) catch |err| switch (@as(NotifierError, err)) {
                 else => |e| return e,
             };
 
-            inline for (&outputs) |output| {
-                send: {
-                    const notifies = switch (output.to_send) {
-                        .none => break :send,
-                        .one => |*one| one[0..1],
-                        .many => |many| many,
-                    };
+            const notifies = switch (output.to_send) {
+                .none => break :call,
+                .one => |*one| one[0..1],
+                .many => |many| many,
+            };
 
-                    for (notifies) |notify| try messaging.send(
-                        frame.multi_conversation,
-                        frame.cvars,
-                        frame.target_index,
-                        .notify,
-                        notify,
-                    );
-                }
-            }
+            for (notifies) |notify| try messaging.send(
+                frame.multi_conversation,
+                frame.cvars,
+                frame.target_index,
+                .notify,
+                notify,
+            );
         }
     };
 }
@@ -123,19 +116,20 @@ pub fn Output(comptime OutNotify: type) type {
     };
 }
 
-fn OutputsOf(Fn: type) type {
-    var types: []const type = &.{};
+fn OutputOf(Fn: type) type {
+    var Type: ?type = null;
 
     inline for (@typeInfo(Fn).@"fn".params) |param| {
         switch (@typeInfo(param.type.?)) {
             .pointer => |pointer| if (@hasDecl(pointer.child, "Notify")) {
-                types = types ++ [1]type{pointer.child};
+                if (Type != null) @compileError("notifiers: multiple outputs are not allowed");
+                Type = pointer.child;
             },
             else => continue,
         }
     }
 
-    return @Tuple(types);
+    return Type orelse @compileError("notifiers: not a single output defined");
 }
 
 const Allocator = std.mem.Allocator;
