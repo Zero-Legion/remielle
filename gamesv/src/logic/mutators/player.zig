@@ -1,15 +1,19 @@
 pub fn mutateBasicInfo(
-    control_avatar: mutators.Input(logic.Changes.ControlAvatar),
-    control_guise_avatar: mutators.Input(logic.Changes.ControlGuiseAvatar),
+    inputs: Inputs(.{
+        logic.Changes.ControlAvatar,
+        logic.Changes.ControlGuiseAvatar,
+    }),
 ) !void {
-    const basic_info = &control_avatar.frame.cvars.properties.basic_info[control_avatar.frame.target_index];
+    const basic_info = &inputs.frame.cvars.properties.basic_info[inputs.frame.target_index];
 
-    if (control_avatar.changes.len != 0)
-        basic_info.control_avatar = control_avatar.changes[0];
+    if (inputs.changes.control_avatar) |control_avatar|
+        basic_info.control_avatar = control_avatar;
 
-    if (control_guise_avatar.changes.len != 0)
-        basic_info.control_guise_avatar = control_guise_avatar.changes[0];
+    if (inputs.changes.control_guise_avatar) |control_guise_avatar|
+        basic_info.control_guise_avatar = control_guise_avatar;
 }
+
+const Inputs = mutators.Inputs;
 
 const logic = @import("../../logic.zig");
 const mutators = @import("../mutators.zig");

@@ -21,9 +21,10 @@ pub fn notifyLogicChanges(
         const In = fn_info.params[0].type.?;
         const Out = @typeInfo(fn_info.params[1].type.?).pointer.child;
 
-        var inputs: In = .init(frame, changes);
-        if (inputs.fulfilled()) call: {
+        if (changes.extract(In.Changes)) |in_changes| call: {
+            const inputs: In = .{ .frame = frame, .changes = in_changes };
             var output: Out = .init(arena);
+
             @field(ns, decl.name)(inputs, &output) catch |err| switch (@as(NotifierError, err)) {
                 else => |e| return e,
             };
@@ -52,51 +53,10 @@ pub fn Inputs(
     return struct {
         const In = @This();
 
-        pub const Changes = Changes: {
-            var field_types: [in_changes.len]type = undefined;
-            var field_names: [in_changes.len][]const u8 = undefined;
-
-            const changes_fields = @typeInfo(logic.Changes).@"struct".fields;
-
-            for (in_changes, &field_types, &field_names) |C, *field_type, *field_name| {
-                search: for (changes_fields) |changes_field| {
-                    if (changes_field.type == ?C or changes_field.type == []const C) {
-                        field_type.* = changes_field.type;
-                        field_name.* = changes_field.name;
-                        break :search;
-                    }
-                } else @compileError("Invalid change type: " ++ @typeName(C));
-            }
-
-            break :Changes @Struct(.auto, null, &field_names, &field_types, &@splat(.{}));
-        };
+        pub const Changes = logic.Changes.Subset(in_changes);
 
         frame: *const Server.Frame,
         changes: Changes,
-
-        pub fn init(frame: *const Server.Frame, logic_changes: *const logic.Changes) In {
-            var changes: Changes = undefined;
-
-            inline for (@typeInfo(Changes).@"struct".fields) |field| {
-                @field(changes, field.name) = @field(logic_changes, field.name);
-            }
-
-            return .{ .changes = changes, .frame = frame };
-        }
-
-        fn fulfilled(in: *const In) bool {
-            inline for (@typeInfo(Changes).@"struct".fields) |field| {
-                switch (@typeInfo(field.type)) {
-                    .optional => if (@field(in.changes, field.name) != null)
-                        return true,
-                    .pointer => if (@field(in.changes, field.name).len != 0)
-                        return true,
-                    else => comptime unreachable,
-                }
-            }
-
-            return false;
-        }
     };
 }
 

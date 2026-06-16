@@ -37,9 +37,47 @@ pub const Avatar = struct {
     equipment_uids: [Properties.Avatar.equipment_slots]Properties.Avatar.OptionalUID,
 };
 
+pub fn Subset(comptime types: anytype) type {
+    var field_types: [types.len]type = undefined;
+    var field_names: [types.len][]const u8 = undefined;
+
+    const changes_fields = @typeInfo(Changes).@"struct".fields;
+
+    for (types, &field_types, &field_names) |C, *field_type, *field_name| {
+        search: for (changes_fields) |changes_field| {
+            if (changes_field.type == ?C or changes_field.type == []const C) {
+                field_type.* = changes_field.type;
+                field_name.* = changes_field.name;
+                break :search;
+            }
+        } else @compileError("Invalid change type: " ++ @typeName(C));
+    }
+
+    return @Struct(.auto, null, &field_names, &field_types, &@splat(.{}));
+}
+
+/// Returns `null` if not a single field is active.
+pub fn extract(logic_changes: *const Changes, comptime Sub: type) ?Sub {
+    var subset: Sub = undefined;
+    var any_fulfilled: u1 = 0;
+
+    inline for (@typeInfo(Sub).@"struct".fields) |field| {
+        @field(subset, field.name) = @field(logic_changes, field.name);
+
+        switch (@typeInfo(field.type)) {
+            .pointer => any_fulfilled |= @intFromBool(@field(logic_changes, field.name).len != 0),
+            .optional => any_fulfilled |= @intFromBool(@field(logic_changes, field.name) != null),
+            else => comptime unreachable,
+        }
+    }
+
+    return if (any_fulfilled != 0) subset else null;
+}
+
 const templates = Assets.templates;
 
 const Assets = @import("../Assets.zig");
+const Server = @import("../Server.zig");
 const Properties = @import("Properties.zig");
 
 const std = @import("std");

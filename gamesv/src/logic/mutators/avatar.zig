@@ -1,9 +1,9 @@
 pub fn mutateAvatar(
-    input: mutators.Input(logic.Changes.Avatar),
+    input: Inputs(.{logic.Changes.Avatar}),
 ) !void {
     const avatar = &input.frame.cvars.properties.avatar[input.frame.target_index];
 
-    for (input.changes) |change| {
+    for (input.changes.avatars) |change| {
         const index = avatar.indexes.get(change.id).?;
 
         avatar.metas[index] = change.meta;
@@ -11,6 +11,8 @@ pub fn mutateAvatar(
         avatar.equipment_uids[index] = change.equipment_uids;
     }
 }
+
+const Inputs = mutators.Inputs;
 
 const logic = @import("../../logic.zig");
 const mutators = @import("../mutators.zig");
