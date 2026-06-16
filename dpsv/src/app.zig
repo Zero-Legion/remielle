@@ -21,7 +21,9 @@ pub fn listen(
     var client_group: Io.Group = .init;
     defer client_group.cancel(io);
 
-    while (true) { // TODO: integrate with graceful shutdown
+    defer log.info("shutting down...", .{});
+
+    while (true) {
         var stream = server.accept(io) catch |err| switch (err) {
             error.Canceled => |e| return e,
             error.SystemResources,

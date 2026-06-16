@@ -40,7 +40,7 @@ pub fn main(init: Init.Minimal) void {
     };
 
     var io_impl = if (rmio.RemiellIo.supported)
-        rmio.RemiellIo.init(gpa, .{ .coroutine_limit = .unlimited, .stack_size = 1024 * 32 }) catch |err|
+        rmio.RemiellIo.init(gpa, .{ .coroutine_limit = .unlimited, .stack_size = 1024 * 128 }) catch |err|
             fatal("failed to init I/O implementation: {t}", .{err})
     else
         std.Io.Threaded.init(gpa, .{});
@@ -48,9 +48,24 @@ pub fn main(init: Init.Minimal) void {
     defer io_impl.deinit();
     const io = io_impl.io();
 
-    app.listen(io, &data, &listen_address) catch |err| switch (err) {
-        error.Canceled => unreachable,
+    const listen_args = .{ io, &data, &listen_address };
+
+    var app_future = io.concurrent(app.listen, listen_args) catch |concurrent_err| switch (concurrent_err) {
+        error.ConcurrencyUnavailable => {
+            @call(.auto, app.listen, listen_args) catch |err| switch (err) {
+                error.Canceled => unreachable,
+            };
+
+            return;
+        },
     };
+
+    if (rmio.RemiellIo.supported) {
+        io_impl.waitForShutdown();
+        app_future.cancel(io) catch {};
+    } else {
+        app_future.await(io) catch {};
+    }
 }
 
 inline fn fatal(comptime fmt: []const u8, args: anytype) noreturn {

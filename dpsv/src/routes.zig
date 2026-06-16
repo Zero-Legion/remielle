@@ -78,7 +78,6 @@ pub fn process(data: *const Data, request: *const http.RequestLine) Result {
 }
 
 const fmt = std.fmt;
-const posix = rmio.posix;
 
 const http = @import("http.zig");
 const Data = @import("Data.zig");
