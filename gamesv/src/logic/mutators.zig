@@ -8,34 +8,32 @@ const namespaces: []const type = &.{
 pub fn dispatchLogicChanges(frame: *const Server.Frame, changes: *const logic.Changes) Error!void {
     inline for (namespaces) |ns| inline for (@typeInfo(ns).@"struct".decls) |decl| {
         const Fn = @TypeOf(@field(ns, decl.name));
-        const fn_info = @typeInfo(Fn).@"fn";
+        const Args = std.meta.ArgsTuple(Fn);
+        var args: Args = undefined;
 
-        if (fn_info.params.len != 1)
-            @compileError("invalid parameters declared on mutator '" ++ decl.name ++ "'");
+        call_mutator: {
+            inline for (&args, @typeInfo(Args).@"struct".fields) |*arg, arg_info| {
+                const ArgType = arg_info.type;
 
-        const In = fn_info.params[0].type.?;
+                if (@hasField(ArgType, logic.Changes.subset_marker_name)) {
+                    arg.* = changes.extract(ArgType) orelse break :call_mutator;
+                    continue;
+                }
 
-        if (changes.extract(In.Changes)) |in_changes| {
-            const inputs: In = .{ .frame = frame, .changes = in_changes };
+                if (@hasField(ArgType, logic.Properties.immutable_subset_marker_name) or
+                    @hasField(ArgType, logic.Properties.mutable_subset_marker_name))
+                {
+                    arg.* = frame.cvars.properties.extractFor(ArgType, frame.target_index);
+                    continue;
+                }
 
-            @field(ns, decl.name)(inputs) catch |err| switch (@as(Error, err)) {
+                @compileError(decl.name ++ ": invalid argument type: " ++ @typeName(ArgType));
+            }
+
+            @call(.auto, @field(ns, decl.name), args) catch |err| switch (@as(Error, err)) {
                 else => |e| return e,
             };
         }
-    };
-}
-
-pub fn Inputs(
-    /// A tuple of input types (fields of logic.Changes)
-    comptime in_changes: anytype,
-) type {
-    return struct {
-        const In = @This();
-
-        pub const Changes = logic.Changes.Subset(in_changes);
-
-        frame: *const Server.Frame,
-        changes: Changes,
     };
 }
 

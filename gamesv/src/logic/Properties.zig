@@ -44,6 +44,64 @@ fn unlockAllAvatars(props: *Properties, at: Player) void {
     };
 }
 
+pub const immutable_subset_marker_name = "logic_properties_subset_marker";
+
+pub const mutable_subset_marker_name = "logic_properties_subset_marker";
+
+pub fn Immutable(comptime types: anytype) type {
+    return Subset(types, .immutable);
+}
+
+pub fn Mutable(comptime types: anytype) type {
+    return Subset(types, .mutable);
+}
+
+fn Subset(
+    /// A tuple of input types (fields of logic.Properties)
+    comptime types: anytype,
+    comptime access: enum { immutable, mutable },
+) type {
+    var field_types: [types.len + 1]type = undefined;
+    var field_names: [types.len + 1][]const u8 = undefined;
+
+    const properties_fields = @typeInfo(Properties).@"struct".fields;
+
+    // Add a ZST field as a marker
+    field_types[0] = void;
+    field_names[0] = switch (access) {
+        .immutable => immutable_subset_marker_name,
+        .mutable => mutable_subset_marker_name,
+    };
+
+    for (types, field_types[1..], field_names[1..]) |P, *field_type, *field_name| {
+        search: for (properties_fields) |properties_field| {
+            if (properties_field.type == []P) {
+                field_type.* = switch (access) {
+                    .immutable => *const P,
+                    .mutable => *P,
+                };
+
+                field_name.* = properties_field.name;
+                break :search;
+            }
+        } else @compileError("Invalid property type: " ++ @typeName(P));
+    }
+
+    return @Struct(.auto, null, &field_names, &field_types, &@splat(.{}));
+}
+
+pub fn extractFor(properties: *Properties, comptime Sub: type, index: u32) Sub {
+    var subset: Sub = undefined;
+
+    inline for (@typeInfo(Sub).@"struct".fields) |field| {
+        if (field.type == void) continue;
+
+        @field(subset, field.name) = &@field(properties, field.name)[index];
+    }
+
+    return subset;
+}
+
 /// Player index.
 pub const Player = enum(u32) {
     _,

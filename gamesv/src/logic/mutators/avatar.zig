@@ -1,18 +1,19 @@
 pub fn mutateAvatar(
-    input: Inputs(.{logic.Changes.Avatar}),
+    changes: logic.Changes.Subset(.{
+        logic.Changes.Avatar,
+    }),
+    properties: logic.Properties.Mutable(.{
+        logic.Properties.Avatar,
+    }),
 ) !void {
-    const avatar = &input.frame.cvars.properties.avatar[input.frame.target_index];
+    for (changes.avatars) |change| {
+        const index = properties.avatar.indexes.get(change.id).?;
 
-    for (input.changes.avatars) |change| {
-        const index = avatar.indexes.get(change.id).?;
-
-        avatar.metas[index] = change.meta;
-        avatar.weapon_uids[index] = change.weapon_uid;
-        avatar.equipment_uids[index] = change.equipment_uids;
+        properties.avatar.metas[index] = change.meta;
+        properties.avatar.weapon_uids[index] = change.weapon_uid;
+        properties.avatar.equipment_uids[index] = change.equipment_uids;
     }
 }
-
-const Inputs = mutators.Inputs;
 
 const logic = @import("../../logic.zig");
 const mutators = @import("../mutators.zig");

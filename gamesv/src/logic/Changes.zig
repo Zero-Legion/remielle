@@ -37,13 +37,19 @@ pub const Avatar = struct {
     equipment_uids: [Properties.Avatar.equipment_slots]Properties.Avatar.OptionalUID,
 };
 
+pub const subset_marker_name = "logic_changes_subset_marker";
+
 pub fn Subset(comptime types: anytype) type {
-    var field_types: [types.len]type = undefined;
-    var field_names: [types.len][]const u8 = undefined;
+    var field_types: [types.len + 1]type = undefined;
+    var field_names: [types.len + 1][]const u8 = undefined;
+
+    // Add a ZST field as a marker
+    field_types[0] = void;
+    field_names[0] = subset_marker_name;
 
     const changes_fields = @typeInfo(Changes).@"struct".fields;
 
-    for (types, &field_types, &field_names) |C, *field_type, *field_name| {
+    for (types, field_types[1..], field_names[1..]) |C, *field_type, *field_name| {
         search: for (changes_fields) |changes_field| {
             if (changes_field.type == ?C or changes_field.type == []const C) {
                 field_type.* = changes_field.type;
@@ -62,6 +68,8 @@ pub fn extract(logic_changes: *const Changes, comptime Sub: type) ?Sub {
     var any_fulfilled: u1 = 0;
 
     inline for (@typeInfo(Sub).@"struct".fields) |field| {
+        if (field.type == void) continue;
+
         @field(subset, field.name) = @field(logic_changes, field.name);
 
         switch (@typeInfo(field.type)) {
