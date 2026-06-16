@@ -88,5 +88,18 @@ pub extern "kernel32" fn CancelIoEx(
     lpOverlapped: *OVERLAPPED,
 ) callconv(.winapi) BOOL;
 
+pub extern "kernel32" fn SetConsoleCtrlHandler(
+    *const fn (dwCtrlType: DWORD) callconv(.winapi) BOOL,
+    BOOL,
+) callconv(.winapi) BOOL;
+
+pub const PAPCFUNC = *const fn (ULONG_PTR) callconv(.winapi) void;
+
+pub extern "kernel32" fn QueueUserAPC(
+    PAPCFUNC,
+    HANDLE,
+    ULONG_PTR,
+) callconv(.winapi) DWORD;
+
 const windows = std.os.windows;
 const std = @import("std");

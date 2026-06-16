@@ -50,12 +50,19 @@ pub fn await(u: *Uring) !void {
         // to flush SQ. However, we should not block here, because
         // there are unacknowledged completions.
 
-        if (u.ring.sq_ready() != 0) _ = try u.ring.submit();
+        if (u.ring.sq_ready() != 0) _ = u.ring.submit() catch |err| switch (err) {
+            error.SignalInterrupt => return,
+            else => |e| return e,
+        };
     } else {
         // We have outstanding operations and there are no pending completions.
         // Now we can block until anything completes.
 
-        _ = try u.ring.submit_and_wait(1);
+        _ = u.ring.submit_and_wait(1) catch |err| switch (err) {
+            error.SignalInterrupt => return,
+            else => |e| return e,
+        };
+
         u.fillCompleted();
     }
 }

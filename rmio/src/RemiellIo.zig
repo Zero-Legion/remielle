@@ -4,6 +4,13 @@ coro_storage: Coroutine.Storage,
 current_coro: ?*Coroutine,
 naked_wait: WaitPoint,
 csprng: ?DefaultCsprng,
+shutdown: enum(u2) {
+    ignored = 0b00,
+    waiting = 0b01,
+    pending = 0b10,
+    acknowledged = 0b11,
+},
+shutdown_wait_point: *WaitPoint, // Populated by `waitForShutdown`
 
 pub const Impl = switch (native_os) {
     .linux => @import("RemiellIo/Uring.zig"),
@@ -87,6 +94,8 @@ pub fn init(gpa: Allocator, options: InitOptions) InitError!RemiellIo {
         .current_coro = null,
         .naked_wait = .{ .awaitee = .none, .context = undefined },
         .csprng = null,
+        .shutdown = .ignored,
+        .shutdown_wait_point = undefined,
     };
 }
 
@@ -828,6 +837,7 @@ const WaitReason = union(enum) {
     idle,
     submission,
     await: *Coroutine,
+    shutdown,
 };
 
 fn block(rio: *RemiellIo, reason: WaitReason) void {
@@ -837,6 +847,8 @@ fn block(rio: *RemiellIo, reason: WaitReason) void {
         // Coroutine has finished execution
         .idle => .idle,
 
+        .shutdown => .idle,
+
         // A new operation submitted by coroutine.
         .submission => enter_wait_point.awaitee, // unchanged
 
@@ -844,6 +856,29 @@ fn block(rio: *RemiellIo, reason: WaitReason) void {
     };
 
     wait_loop: while (!rio.waitPoint().awaitee.ready()) {
+        if (rio.shutdown == .pending) {
+            rio.shutdown = .acknowledged;
+
+            // Resume the shutdown awaiter
+            const wait_point = rio.shutdown_wait_point;
+            const maybe_coro: ?*Coroutine = if (wait_point == &rio.naked_wait)
+                null
+            else
+                @fieldParentPtr("wait_point", wait_point);
+
+            if (maybe_coro == rio.current_coro) {
+                break :wait_loop;
+            }
+
+            const save_into = &rio.waitPoint().context;
+            rio.current_coro = maybe_coro;
+
+            _ = Io.fiber.contextSwitch(&.{
+                .old = save_into,
+                .new = &wait_point.context,
+            });
+        }
+
         while (rio.coro_storage.queued_list.popFirst()) |node| {
             const next_coro: *Coroutine = @fieldParentPtr("list_node", node);
 
@@ -855,7 +890,9 @@ fn block(rio: *RemiellIo, reason: WaitReason) void {
                 .new = &next_coro.wait_point.context,
             });
 
-            if (rio.waitPoint().awaitee.ready()) break :wait_loop;
+            if (rio.waitPoint().awaitee.ready() or
+                reason == .shutdown and
+                    rio.shutdown == .acknowledged) break :wait_loop;
         }
 
         _ = rio.impl.await() catch |err| if (is_debug)
@@ -1037,6 +1074,71 @@ pub const Operation = union(enum) {
     };
 };
 
+pub fn waitForShutdown(rio: *RemiellIo) void {
+    const inner = struct {
+        var rio_instance: *RemiellIo = undefined;
+
+        // Windows only.
+        var waiting_thread_handle: std.Thread.Handle = undefined;
+
+        fn sigHandler(_: std.posix.SIG) callconv(.c) void {
+            switch (rio_instance.shutdown) {
+                .ignored => unreachable,
+                .waiting => rio_instance.shutdown = .pending,
+                .pending, .acknowledged => {},
+            }
+        }
+
+        fn shutdownApc(_: windows.ULONG_PTR) callconv(.winapi) void {
+            switch (rio_instance.shutdown) {
+                .ignored => unreachable,
+                .waiting => rio_instance.shutdown = .pending,
+                .pending, .acknowledged => {},
+            }
+        }
+
+        fn consoleCtrlHandler(_: std.os.windows.DWORD) callconv(.winapi) std.os.windows.BOOL {
+            std.debug.assert(kernel32.QueueUserAPC(
+                shutdownApc,
+                waiting_thread_handle,
+                0,
+            ) != 0);
+
+            return .TRUE;
+        }
+    };
+
+    debug.assert(rio.shutdown == .ignored); // Tried to wait for shutdown twice.
+
+    inner.rio_instance = rio;
+    rio.shutdown = .waiting;
+    rio.shutdown_wait_point = rio.waitPoint();
+
+    if (is_windows) {
+        std.debug.assert(windows.ntdll.NtOpenThread(
+            &inner.waiting_thread_handle,
+            windows.ACCESS_MASK.Specific.Thread.ALL_ACCESS,
+            &.{ .ObjectName = null },
+            &windows.teb().ClientId,
+        ) == .SUCCESS);
+
+        _ = kernel32.SetConsoleCtrlHandler(inner.consoleCtrlHandler, .TRUE);
+    } else {
+        _ = posix.system.sigaction(
+            .INT,
+            &.{
+                .handler = .{ .handler = inner.sigHandler },
+                .mask = std.mem.zeroes(@FieldType(posix.Sigaction, "mask")),
+                .flags = 0,
+            },
+            null, // oldact
+        );
+    }
+
+    rio.block(.shutdown);
+}
+
+const is_windows = native_os == .windows;
 const native_os = builtin.os.tag;
 const is_debug = builtin.mode == .Debug;
 
@@ -1049,8 +1151,11 @@ const DefaultCsprng = std.Random.DefaultCsprng;
 
 const net = std.Io.net;
 const debug = std.debug;
+const posix = std.posix;
 const linux = std.os.linux;
 const windows = std.os.windows;
+
+const kernel32 = @import("RemiellIo/Iocp/kernel32.zig");
 
 const std = @import("std");
 const builtin = @import("builtin");

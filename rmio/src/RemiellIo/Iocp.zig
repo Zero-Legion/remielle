@@ -53,7 +53,7 @@ pub fn await(iocp: *Iocp) Io.UnexpectedError!void {
             std.math.maxInt(u32),
             .TRUE,
         ) == .FALSE) return switch (windows.GetLastError()) {
-            .EXE_MARKED_INVALID => continue, // it's in fact WAIT_IO_COMPLETION, they share the same number.
+            .EXE_MARKED_INVALID => return, // WAIT_IO_COMPLETION - thread alerted.
             else => |e| return unexpectedWin32(e),
         };
 
