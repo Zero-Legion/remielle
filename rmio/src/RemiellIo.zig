@@ -301,8 +301,8 @@ fn operate(userdata: ?*anyopaque, operation: Io.Operation) Io.Cancelable!Io.Oper
             return .{ .net_receive = .{ null, 1 } };
         },
 
-        .file_read_streaming, .file_write_streaming => @panic("TODO: implement file I/O"),
-        .device_io_control => @panic("`device_io_control` is not supported"),
+        .file_read_streaming, .file_write_streaming => unreachable, // Not implemented
+        .device_io_control => unreachable, // Not implemented
     }
 }
 
@@ -858,7 +858,10 @@ fn block(rio: *RemiellIo, reason: WaitReason) void {
             if (rio.waitPoint().awaitee.ready()) break :wait_loop;
         }
 
-        _ = rio.impl.await() catch @panic("impl.await");
+        _ = rio.impl.await() catch |err| if (is_debug)
+            debug.panic("rio.impl.await: {t}", .{err})
+        else
+            abort();
 
         while (rio.impl.completions.popFirst()) |node| {
             const completion: *Operation.Storage.Completion = @alignCast(@fieldParentPtr("node", node));
@@ -1035,6 +1038,9 @@ pub const Operation = union(enum) {
 };
 
 const native_os = builtin.os.tag;
+const is_debug = builtin.mode == .Debug;
+
+const abort = std.process.abort;
 
 const Io = std.Io;
 const Allocator = std.mem.Allocator;

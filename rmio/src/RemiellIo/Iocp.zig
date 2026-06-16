@@ -732,7 +732,6 @@ pub const closesocket = ws2_32.closesocket;
 pub const SOCKET = ws2_32.SOCKET;
 
 const windows = std.os.windows;
-const panic = std.debug.panic;
 
 const Io = std.Io;
 const Operation = RemiellIo.Operation;

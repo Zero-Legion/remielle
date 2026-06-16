@@ -498,17 +498,24 @@ pub fn Vector(mut: Mutability) type {
 }
 
 fn unexpected(e: linux.E) noreturn {
-    panic("unexpected errno: {t}", .{e});
+    if (is_debug)
+        panic("unexpected errno: {t}", .{e})
+    else
+        abort();
 }
+
+const is_debug = builtin.mode == .Debug;
 
 const fd_t = linux.fd_t;
 const errno = linux.errno;
 const linux = std.os.linux;
 const panic = std.debug.panic;
+const abort = std.process.abort;
 
 const Io = std.Io;
 const Operation = RemiellIo.Operation;
 
 const RemiellIo = @import("../RemiellIo.zig");
+const builtin = @import("builtin");
 const std = @import("std");
 const Uring = @This();
