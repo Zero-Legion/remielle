@@ -1,141 +1,161 @@
 pub fn getAvatarData(
-    input: handlers.Input(pb.GetAvatarDataCsReq),
-    output: handlers.Output(pb.GetAvatarDataScRsp),
+    message: Message(pb.GetAvatarDataCsReq),
+    properties: Properties.Immutable(.{
+        Properties.Avatar,
+    }),
+    response: Response(pb.GetAvatarDataScRsp),
 ) !void {
-    const avatar = &input.frame.cvars.properties.avatar[input.frame.target_index];
+    _ = message;
 
-    const metas = avatar.meta();
-    const weapon_uids = avatar.weaponUids();
-    const equipment_uids = avatar.equipmentUids();
+    const count = properties.avatar.count();
 
-    var infos: ArrayList(pb.AvatarInfo) = try .initCapacity(output.arena, metas.len);
+    const metas = properties.avatar.meta[0..count];
+    const weapon_uids = properties.avatar.weapon_uids[0..count];
+    const equipment_uids = properties.avatar.equipment_uids[0..count];
+
+    var infos: ArrayList(pb.AvatarInfo) = try .initCapacity(response.allocator, metas.len);
 
     for (metas, weapon_uids, equipment_uids, 0..) |*meta, weapon_uid, equipment, index|
         infos.appendAssumeCapacity(try packers.packAvatarInfo(
-            output.arena,
-            avatar.ids[index],
+            response.allocator,
+            properties.avatar.ids[index],
             meta,
             weapon_uid,
             equipment,
         ));
 
-    output.respond(.{ .avatar_list = infos });
+    response.set(.{ .avatar_list = infos });
 }
 
 pub fn avatarFavorite(
-    input: handlers.Input(pb.AvatarFavoriteCsReq),
-    output: handlers.Output(pb.AvatarFavoriteScRsp),
+    message: Message(pb.AvatarFavoriteCsReq),
+    properties: Properties.Immutable(.{
+        Properties.Avatar,
+    }),
+    changes: Changes.Builder(.{
+        Changes.Avatar,
+    }),
+    response: Response(pb.AvatarFavoriteScRsp),
 ) !void {
-    const avatar = &input.frame.cvars.properties.avatar[input.frame.target_index];
-
     const maybe_index: ?u32 = avatar_index: {
-        const id = std.enums.fromInt(Properties.Avatar.Id, input.message.avatar_id) orelse
+        const id = std.enums.fromInt(Properties.Avatar.Id, message.data.avatar_id) orelse
             break :avatar_index null;
 
-        break :avatar_index avatar.indexes.get(id);
+        break :avatar_index properties.avatar.indexes.get(id);
     };
 
     const index = maybe_index orelse
-        return output.bail(.{ .retcode = 1 });
+        return response.fail(1);
 
-    var meta = avatar.metas[index];
+    var meta = properties.avatar.meta[index];
 
-    if (meta.flags.favorite != input.message.is_favorite) {
-        meta.flags.favorite = input.message.is_favorite;
+    if (meta.flags.favorite != message.data.is_favorite) {
+        meta.flags.favorite = message.data.is_favorite;
 
-        const changes = try output.arena.alloc(logic.Changes.Avatar, 1);
+        const avatars = try changes.allocator.alloc(Changes.Avatar, 1);
 
-        changes[0] = .{
-            .id = avatar.ids[index],
+        avatars[0] = .{
+            .id = properties.avatar.ids[index],
             .meta = meta,
-            .weapon_uid = avatar.weapon_uids[index],
-            .equipment_uids = avatar.equipment_uids[index],
+            .weapon_uid = properties.avatar.weapon_uids[index],
+            .equipment_uids = properties.avatar.equipment_uids[index],
         };
 
-        output.changes.avatars = changes;
+        changes.insert(avatars);
     }
 
-    output.respond(.init);
+    response.set(.init);
 }
 
 pub fn avatarSkinDress(
-    input: handlers.Input(pb.AvatarSkinDressCsReq),
-    output: handlers.Output(pb.AvatarSkinDressScRsp),
+    message: Message(pb.AvatarSkinDressCsReq),
+    properties: Properties.Immutable(.{
+        Properties.Avatar,
+    }),
+    changes: Changes.Builder(.{
+        Changes.Avatar,
+    }),
+    response: Response(pb.AvatarSkinDressScRsp),
 ) !void {
-    const avatar = &input.frame.cvars.properties.avatar[input.frame.target_index];
-
     const maybe_index: ?u32 = avatar_index: {
-        const id = std.enums.fromInt(Properties.Avatar.Id, input.message.avatar_id) orelse
+        const id = std.enums.fromInt(Properties.Avatar.Id, message.data.avatar_id) orelse
             break :avatar_index null;
 
-        break :avatar_index avatar.indexes.get(id);
+        break :avatar_index properties.avatar.indexes.get(id);
     };
 
     const index = maybe_index orelse
-        return output.bail(.{ .retcode = 1 });
+        return response.fail(1);
 
-    var meta = avatar.metas[index];
+    var meta = properties.avatar.meta[index];
 
-    if (meta.skin.toInt() != input.message.avatar_skin_id) {
+    if (meta.skin.toInt() != message.data.avatar_skin_id) {
         // TODO: check if it belongs to this avatar and if it's unlocked.
 
-        meta.skin = @enumFromInt(input.message.avatar_skin_id);
+        const avatars = try changes.allocator.alloc(Changes.Avatar, 1);
 
-        const changes = try output.arena.alloc(logic.Changes.Avatar, 1);
-
-        changes[0] = .{
-            .id = avatar.ids[index],
+        avatars[0] = .{
+            .id = properties.avatar.ids[index],
             .meta = meta,
-            .weapon_uid = avatar.weapon_uids[index],
-            .equipment_uids = avatar.equipment_uids[index],
+            .weapon_uid = properties.avatar.weapon_uids[index],
+            .equipment_uids = properties.avatar.equipment_uids[index],
         };
 
-        output.changes.avatars = changes;
+        changes.insert(avatars);
     }
 
-    output.respond(.init);
+    response.set(.init);
 }
 
 pub fn avatarSkinUnDress(
-    input: handlers.Input(pb.AvatarSkinUnDressCsReq),
-    output: handlers.Output(pb.AvatarSkinUnDressScRsp),
+    message: Message(pb.AvatarSkinUnDressCsReq),
+    properties: Properties.Immutable(.{
+        Properties.Avatar,
+    }),
+    changes: Changes.Builder(.{
+        Changes.Avatar,
+    }),
+    response: Response(pb.AvatarSkinUnDressScRsp),
 ) !void {
-    const avatar = &input.frame.cvars.properties.avatar[input.frame.target_index];
-
     const maybe_index: ?u32 = avatar_index: {
-        const id = std.enums.fromInt(Properties.Avatar.Id, input.message.avatar_id) orelse
+        const id = std.enums.fromInt(Properties.Avatar.Id, message.data.avatar_id) orelse
             break :avatar_index null;
 
-        break :avatar_index avatar.indexes.get(id);
+        break :avatar_index properties.avatar.indexes.get(id);
     };
 
     const index = maybe_index orelse
-        return output.bail(.{ .retcode = 1 });
+        return response.fail(1);
 
-    var meta = avatar.metas[index];
+    var meta = properties.avatar.meta[index];
 
     if (meta.skin != .none) {
         meta.skin = .none;
 
-        const changes = try output.arena.alloc(logic.Changes.Avatar, 1);
+        const avatars = try changes.allocator.alloc(Changes.Avatar, 1);
 
-        changes[0] = .{
-            .id = avatar.ids[index],
+        avatars[0] = .{
+            .id = properties.avatar.ids[index],
             .meta = meta,
-            .weapon_uid = avatar.weapon_uids[index],
-            .equipment_uids = avatar.equipment_uids[index],
+            .weapon_uid = properties.avatar.weapon_uids[index],
+            .equipment_uids = properties.avatar.equipment_uids[index],
         };
 
-        output.changes.avatars = changes;
+        changes.insert(avatars);
     }
 
-    output.respond(.init);
+    response.set(.init);
 }
 
 const Avatar = Properties.Avatar;
 const ArrayList = std.ArrayList;
 const templates = Assets.templates;
+
+const Changes = logic.Changes;
 const Properties = logic.Properties;
+
+const Message = handlers.Message;
+const Response = handlers.Response;
 
 const logic = @import("../../logic.zig");
 const packers = @import("../packers.zig");

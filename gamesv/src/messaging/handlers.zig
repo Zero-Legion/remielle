@@ -14,16 +14,19 @@ const CmdId = CmdId: {
     var values: []const u16 = &.{};
 
     for (namespaces) |ns| for (@typeInfo(ns).@"struct".decls) |decl| {
-        const fn_info = @typeInfo(@TypeOf(@field(ns, decl.name))).@"fn";
-        const InPtr = fn_info.params[0].type.?;
-        const In = @typeInfo(InPtr).pointer.child;
+        const Fn = @TypeOf(@field(ns, decl.name));
+        const Msg = MessageOf(Fn);
 
-        values = values ++ .{rmpb.cmdId(In.Message) orelse continue};
-        names = names ++ .{In.Message.pb_desc_name};
+        values = values ++ .{rmpb.cmdId(Msg.Data) orelse continue};
+        names = names ++ .{Msg.Data.pb_desc_name};
     };
 
     break :CmdId @Enum(u16, .exhaustive, names, @ptrCast(values));
 };
+
+pub const HandlerError = error{
+    IllegalMessage,
+} || Allocator.Error;
 
 pub const ProcessError = error{
     DecodeFail,
@@ -34,6 +37,8 @@ pub fn process(
     frame: *const Server.Frame,
     reader: *Io.Reader,
 ) ProcessError!void {
+    @setEvalBranchQuota(1_000_000);
+
     const msg_header_bytes = reader.takeArray(messaging.Header.size) catch
         return error.DecodeFail;
 
@@ -68,19 +73,14 @@ pub fn process(
     switch (cmd_id) {
         inline else => |id| lookup: inline for (namespaces) |ns| {
             inline for (@typeInfo(ns).@"struct".decls) |decl| {
-                const fn_info = @typeInfo(@TypeOf(@field(ns, decl.name))).@"fn";
+                const Fn = @TypeOf(@field(ns, decl.name));
 
-                const InPtr = fn_info.params[0].type.?;
-                const In = @typeInfo(InPtr).pointer.child;
+                const InMessage = MessageOf(Fn);
+                if (@intFromEnum(id) != rmpb.cmdId(InMessage.Data)) continue;
 
-                const OutPtr = fn_info.params[1].type.?;
-                const Out = @typeInfo(OutPtr).pointer.child;
-
-                if (@intFromEnum(id) != rmpb.cmdId(In.Message)) continue;
-
-                const in_message = rmpb.decode(
+                const data = rmpb.decode(
                     .main,
-                    In.Message,
+                    InMessage.Data,
                     arena,
                     &xored_reader.interface,
                 ) catch |err| switch (err) {
@@ -88,33 +88,98 @@ pub fn process(
                     else => return error.DecodeFail,
                 };
 
-                const input: In = .{
-                    .frame = frame,
-                    .message = &in_message,
+                const message: InMessage = .{ .data = &data };
+
+                var changes: logic.Changes = .init;
+
+                const Args = std.meta.ArgsTuple(Fn);
+                var args: Args = undefined;
+
+                const OutResponse = ResponseOf(Fn);
+                var out_response: (OutResponse orelse void) = undefined;
+
+                if (OutResponse != null) out_response = .{
+                    .allocator = arena,
+                    .data = null,
                 };
 
-                var output: Out = .init(arena);
+                inline for (&args, @typeInfo(Args).@"struct".fields) |*arg, arg_info| {
+                    switch (arg_info.type) {
+                        InMessage => arg.* = message,
 
-                @field(ns, decl.name)(&input, &output) catch |err| switch (@as(ProcessError, err)) {
-                    else => |e| return e,
-                };
+                        logic.RealTimeClock => arg.* = .{
+                            .time = frame.time,
+                            .utc_offset = 3, // TODO: configuration field + cli option
+                        },
 
-                if (!output.failed) {
-                    try logic.mutators.dispatchLogicChanges(frame, &output.changes);
-                    try messaging.notifiers.notifyLogicChanges(arena, frame, &output.changes);
+                        else => |ArgType| {
+                            switch (@typeInfo(ArgType)) {
+                                .pointer => |pointer| switch (pointer.child) {
+                                    @TypeOf(out_response) => {
+                                        arg.* = &out_response;
+                                        continue;
+                                    },
+                                    else => {},
+                                },
+                                else => {
+                                    if (@hasField(ArgType, "pointers")) { // logic.Changes.Builder
+                                        arg.* = .init(arena, &changes);
+                                        continue;
+                                    }
+
+                                    // Accepting mutable properties is intentionally not allowed.
+                                    if (@hasField(ArgType, logic.Properties.immutable_subset_marker_name)) {
+                                        arg.* = frame.cvars.properties.extractFor(ArgType, frame.target_index);
+                                        continue;
+                                    }
+                                },
+                            }
+
+                            @compileError(decl.name ++ ": invalid argument type: " ++ @typeName(ArgType));
+                        },
+                    }
                 }
 
-                const OutMessage = @FieldType(Out, "message");
+                if (@call(.auto, @field(ns, decl.name), args)) {
+                    // Success, run the pipeline
+                    try logic.mutators.dispatchLogicChanges(frame, &changes);
+                    try messaging.notifiers.notifyLogicChanges(arena, frame, &changes);
+                } else |err| switch (@as(HandlerError, err)) {
+                    error.IllegalMessage => {
+                        // Send the response but don't run the pipeline
+                        if (OutResponse) |Rsp| {
+                            if (@hasField(Rsp.Data, "retcode")) {
+                                if (out_response.data) |rsp|
+                                    log.debug(
+                                        InMessage.log_prefix ++ "handler failed with retcode {d}",
+                                        .{rsp.retcode},
+                                    );
+                            }
+                        }
+                    },
+                    else => |e| return e,
+                }
 
-                if (OutMessage != void) {
-                    if (output.message) |out_message| {
-                        if (rmpb.cmdId(@typeInfo(OutMessage).optional.child) != null) {
-                            try messaging.send(frame.multi_conversation, frame.cvars, frame.target_index, .ack(head.packet_id), out_message);
+                if (OutResponse) |Rsp| {
+                    if (out_response.data) |out_message| {
+                        if (rmpb.cmdId(Rsp.Data) != null) {
+                            try messaging.send(
+                                frame.multi_conversation,
+                                frame.cvars,
+                                frame.target_index,
+                                .ack(head.packet_id),
+                                out_message,
+                            );
                         } else {
-                            try messaging.sendDummy(frame.multi_conversation, frame.cvars, frame.target_index, .ack(head.packet_id));
+                            try messaging.sendDummy(
+                                frame.multi_conversation,
+                                frame.cvars,
+                                frame.target_index,
+                                .ack(head.packet_id),
+                            );
 
                             log.debug(
-                                In.log_prefix ++ "response is not described; sent dummy to {f}",
+                                InMessage.log_prefix ++ "response is not described; sent dummy to {f}",
                                 .{frame.cvars.addrs[frame.target_index]},
                             );
                         }
@@ -122,7 +187,7 @@ pub fn process(
                 }
 
                 log.debug(
-                    "processed message of type " ++ In.Message.pb_desc_name ++ " from {f}",
+                    "processed message of type " ++ InMessage.Data.pb_desc_name ++ " from {f}",
                     .{frame.cvars.addrs[frame.target_index]},
                 );
 
@@ -132,68 +197,66 @@ pub fn process(
     }
 }
 
-fn NotifiesStruct(comptime definition_struct: anytype) type {
-    const Struct = @TypeOf(definition_struct);
-    const struct_fields = @typeInfo(Struct).@"struct".fields;
+pub fn Message(Msg: type) type {
+    return struct {
+        pub const Data = Msg;
 
-    var field_names: [struct_fields.len][]const u8 = undefined;
-    var field_types: [struct_fields.len]type = undefined;
+        pub const log_prefix = "[" ++ Data.pb_desc_name ++ "] ";
 
-    inline for (struct_fields, &field_names, &field_types) |struct_field, *field_name, *field_type| {
-        field_name.* = struct_field.name;
-        field_type.* = ?@field(definition_struct, struct_field.name);
-    }
-
-    return @Struct(.auto, null, &field_names, &field_types, &@splat(.{}));
-}
-
-pub fn Input(InMessage: type) type {
-    return *const struct {
-        const In = @This();
-
-        pub const Message = InMessage;
-        pub const log_prefix = "[" ++ InMessage.pb_desc_name ++ "] ";
-
-        frame: *const Server.Frame,
-        message: *const Message,
+        data: *const Data,
     };
 }
 
-pub fn Output(OutMessage: ?type) type {
+pub fn Response(Msg: type) type {
     return *struct {
-        const Out = @This();
+        pub const Data = Msg;
 
-        pub const Message = OutMessage;
+        allocator: Allocator,
+        data: ?Data,
 
-        /// Temporary allocator for populating the `Output` itself.
-        arena: Allocator,
-        /// The outgoing message.
-        message: if (OutMessage) |Msg| ?Msg else void,
-        /// Logic state modifications.
-        changes: logic.Changes,
-        /// If this is true, the rest of the pipeline won't be executed.
-        failed: bool,
-
-        pub fn init(arena: Allocator) Out {
-            return .{
-                .arena = arena,
-                .message = if (OutMessage) |_| null else {},
-                .changes = .init,
-                .failed = false,
-            };
+        pub inline fn set(response: *@This(), data: Data) void {
+            std.debug.assert(response.data == null);
+            response.data = data;
         }
 
-        pub fn respond(out: *Out, response: OutMessage.?) void {
-            std.debug.assert(out.message == null);
-            out.message = response;
-        }
-
-        pub fn bail(out: *Out, response: OutMessage.?) void {
-            std.debug.assert(out.message == null);
-            out.message = response;
-            out.failed = true;
+        /// Shorthand for returning a failure.
+        pub fn fail(response: *@This(), retcode: i32) error{IllegalMessage} {
+            // TODO: `Retcode` enum
+            response.set(.{ .retcode = retcode });
+            return error.IllegalMessage;
         }
     };
+}
+
+fn MessageOf(comptime Fn: type) type {
+    inline for (@typeInfo(Fn).@"fn".params) |param| {
+        const Param = param.type.?;
+        if (!@hasField(Param, "data")) continue;
+
+        switch (@typeInfo(@FieldType(Param, "data"))) {
+            .pointer => |pointer| if (Param == Message(pointer.child))
+                return Param,
+            else => continue,
+        }
+    } else comptime unreachable; // Handler has no `Message` argument.
+}
+
+fn ResponseOf(comptime Fn: type) ?type {
+    inline for (@typeInfo(Fn).@"fn".params) |param| {
+        const ParamIndirect = param.type.?;
+        const Param = switch (@typeInfo(ParamIndirect)) {
+            .pointer => |pointer| pointer.child,
+            else => continue,
+        };
+
+        if (!@hasField(Param, "data")) continue;
+
+        switch (@typeInfo(@FieldType(Param, "data"))) {
+            .optional => |optional| if (ParamIndirect == Response(optional.child))
+                return Param,
+            else => continue,
+        }
+    } else return null;
 }
 
 const Io = std.Io;

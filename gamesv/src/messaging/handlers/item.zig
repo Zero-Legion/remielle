@@ -1,47 +1,50 @@
 pub fn getWeaponData(
-    input: handlers.Input(pb.GetWeaponDataCsReq),
-    output: handlers.Output(pb.GetWeaponDataScRsp),
+    message: Message(pb.GetWeaponDataCsReq),
+    response: Response(pb.GetWeaponDataScRsp),
 ) !void {
-    _ = input;
-    output.respond(.init);
+    _ = message;
+    response.set(.init);
 }
 
 pub fn getEquipData(
-    input: handlers.Input(pb.GetEquipDataCsReq),
-    output: handlers.Output(pb.GetEquipDataScRsp),
+    message: Message(pb.GetEquipDataCsReq),
+    response: Response(pb.GetEquipDataScRsp),
 ) !void {
-    _ = input;
-    output.respond(.init);
+    _ = message;
+    response.set(.init);
 }
 
 pub fn getItemData(
-    input: handlers.Input(pb.GetItemDataCsReq),
-    output: handlers.Output(pb.GetItemDataScRsp),
+    message: Message(pb.GetItemDataCsReq),
+    response: Response(pb.GetItemDataScRsp),
 ) !void {
-    _ = input;
+    _ = message;
 
     var materials: std.ArrayList(pb.MaterialInfo) = try .initCapacity(
-        output.arena,
+        response.allocator,
         templates.avatar_skin_base.entries.len,
     );
 
     for (templates.avatar_skin_base.entries) |entry|
         materials.appendAssumeCapacity(.{ .id = entry.id, .count = 1 });
 
-    output.respond(.{
+    response.set(.{
         .material_list = materials,
     });
 }
 
 pub fn getWishlistData(
-    input: handlers.Input(pb.GetWishlistDataCsReq),
-    output: handlers.Output(pb.GetWishlistDataScRsp),
+    message: Message(pb.GetWishlistDataCsReq),
+    response: Response(pb.GetWishlistDataScRsp),
 ) !void {
-    _ = input;
-    output.respond(.init);
+    _ = message;
+    response.set(.init);
 }
 
 const templates = Assets.templates;
+
+const Message = handlers.Message;
+const Response = handlers.Response;
 
 const Assets = @import("../../Assets.zig");
 const handlers = @import("../handlers.zig");

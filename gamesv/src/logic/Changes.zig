@@ -10,11 +10,6 @@ pub const init: Changes = .{
     .avatars = &.{},
 };
 
-pub fn switchGameMode(changes: *Changes, gm: GameMode) void {
-    std.debug.assert(changes.game_mode == null); // Tried to switch game mode twice.
-    changes.game_mode = gm;
-}
-
 /// Game mode switch.
 pub const GameMode = union(enum) {
     hall: Hall,
@@ -60,6 +55,69 @@ pub fn Subset(comptime types: anytype) type {
     }
 
     return @Struct(.auto, null, &field_names, &field_types, &@splat(.{}));
+}
+
+pub fn Builder(comptime types: anytype) type {
+    return struct {
+        const Pointers = pointers: {
+            const changes_fields = @typeInfo(Changes).@"struct".fields;
+
+            var field_types: [types.len]type = undefined;
+            var field_names: [types.len][]const u8 = undefined;
+
+            for (types, &field_types, &field_names) |C, *field_type, *field_name| {
+                search: for (changes_fields) |changes_field| {
+                    if (changes_field.type == ?C or changes_field.type == []const C) {
+                        field_type.* = *changes_field.type;
+                        field_name.* = changes_field.name;
+                        break :search;
+                    }
+                } else @compileError("Invalid change type: " ++ @typeName(C));
+            }
+
+            break :pointers @Struct(.auto, null, &field_names, &field_types, &@splat(.{}));
+        };
+
+        allocator: std.mem.Allocator,
+        pointers: Pointers,
+
+        pub fn init(allocator: std.mem.Allocator, changes: *Changes) @This() {
+            var pointers: Pointers = undefined;
+
+            inline for (@typeInfo(Pointers).@"struct".fields) |field| {
+                @field(pointers, field.name) = &@field(changes, field.name);
+            }
+
+            return .{ .allocator = allocator, .pointers = pointers };
+        }
+
+        pub inline fn insert(builder: *const @This(), change: anytype) void {
+            const Change = @TypeOf(change);
+
+            switch (@typeInfo(Change)) {
+                .pointer => |pointer| {
+                    inline for (@typeInfo(Changes).@"struct".fields) |field| {
+                        if (field.type == []const pointer.child) {
+                            const ptr = @field(builder.pointers, field.name);
+                            std.debug.assert(ptr.*.len == 0);
+                            ptr.* = change;
+                            break;
+                        }
+                    } else @compileError("invalid change type: " ++ @typeName(Change));
+                },
+                else => {
+                    inline for (@typeInfo(Changes).@"struct".fields) |field| {
+                        if (field.type == ?Change) {
+                            const ptr = @field(builder.pointers, field.name);
+                            std.debug.assert(ptr.* == null);
+                            ptr.* = change;
+                            break;
+                        }
+                    } else @compileError("invalid change type: " ++ @typeName(Change));
+                },
+            }
+        }
+    };
 }
 
 /// Returns `null` if not a single field is active.

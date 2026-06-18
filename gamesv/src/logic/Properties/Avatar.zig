@@ -6,29 +6,17 @@ pub const Id = templates.avatar_base.Id;
 
 indexes: std.EnumMap(Id, u32),
 ids: [size]Id,
-metas: [size]Meta,
+meta: [size]Meta,
 weapon_uids: [size]OptionalUID,
 equipment_uids: [size][equipment_slots]OptionalUID,
 
 pub const init: Avatar = .{
     .indexes = .init(.{}),
     .ids = undefined,
-    .metas = undefined,
+    .meta = undefined,
     .weapon_uids = undefined,
     .equipment_uids = undefined,
 };
-
-pub fn meta(a: *Avatar) []Meta {
-    return a.metas[0..a.indexes.count()];
-}
-
-pub fn weaponUids(a: *Avatar) []OptionalUID {
-    return a.weapon_uids[0..a.indexes.count()];
-}
-
-pub fn equipmentUids(a: *Avatar) [][equipment_slots]OptionalUID {
-    return a.equipment_uids[0..a.indexes.count()];
-}
 
 pub const Meta = struct {
     level: Level,
@@ -40,6 +28,10 @@ pub const Meta = struct {
     skill_levels: [Skill.count]Skill.Level,
     skin: Skin,
 };
+
+pub fn count(avatar: *const Avatar) usize {
+    return avatar.indexes.count();
+}
 
 pub const OptionalUID = enum(u32) {
     none = 0,
@@ -138,7 +130,7 @@ pub const TalentSwitch = enum(u6) {
     init = 0b000000,
     _,
 
-    pub fn fromBools(bools: *[count]bool) ?TalentSwitch {
+    pub fn fromBools(bools: *[TalentSwitch.count]bool) ?TalentSwitch {
         var int: u6 = 0;
         inline for (bools, 0..) |bit, index|
             int |= @intFromBool(bit) << index;
@@ -149,9 +141,9 @@ pub const TalentSwitch = enum(u6) {
         return @enumFromInt(int);
     }
 
-    pub fn toBools(ts: TalentSwitch) [count]bool {
+    pub fn toBools(ts: TalentSwitch) [TalentSwitch.count]bool {
         const int = @intFromEnum(ts);
-        var bools: [count]bool = undefined;
+        var bools: [TalentSwitch.count]bool = undefined;
 
         inline for (&bools, 0..) |*bit, index|
             bit.* = (int >> index) & 1 != 0;

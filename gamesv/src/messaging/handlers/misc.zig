@@ -1,23 +1,32 @@
 pub fn getServerTimestamp(
-    input: handlers.Input(pb.GetServerTimestampCsReq),
-    output: handlers.Output(pb.GetServerTimestampScRsp),
+    rtc: RealTimeClock,
+    message: Message(pb.GetServerTimestampCsReq),
+    response: Response(pb.GetServerTimestampScRsp),
 ) !void {
-    output.respond(.{
-        .timestamp = @intCast(input.frame.time.toMilliseconds()),
+    _ = message;
+
+    response.set(.{
+        .timestamp = @intCast(rtc.time.toMilliseconds()),
+        .utc_offset = rtc.utc_offset,
     });
 }
 
 pub fn getMiscData(
-    input: handlers.Input(pb.GetMiscDataCsReq),
-    output: handlers.Output(pb.GetMiscDataScRsp),
+    message: Message(pb.GetMiscDataCsReq),
+    properties: Properties.Immutable(.{
+        Properties.BasicInfo,
+    }),
+    response: Response(pb.GetMiscDataScRsp),
 ) !void {
-    var unlocked_list: std.ArrayList(i32) = try .initCapacity(
-        output.arena,
+    _ = message;
+
+    var unlocked_list: ArrayList(i32) = try .initCapacity(
+        response.allocator,
         templates.unlock_config.entries.len,
     );
 
-    var post_girls: std.ArrayList(pb.PostGirlItem) = try .initCapacity(
-        output.arena,
+    var post_girls: ArrayList(pb.PostGirlItem) = try .initCapacity(
+        response.allocator,
         templates.post_girl_config.entries.len,
     );
 
@@ -27,14 +36,12 @@ pub fn getMiscData(
     for (templates.post_girl_config.entries) |config|
         post_girls.appendAssumeCapacity(.{ .id = config.id });
 
-    var show_post_girls: std.ArrayList(u32) = try .initCapacity(output.arena, 1);
+    var show_post_girls: std.ArrayList(u32) = try .initCapacity(response.allocator, 1);
     show_post_girls.appendAssumeCapacity(
         @intFromEnum(templates.post_girl_config.Id.Avatar_Female_Size03_Velina),
     );
 
-    const basic_info = &input.frame.cvars.properties.basic_info[input.frame.target_index];
-
-    output.respond(.{ .data = .{
+    response.set(.{ .data = .{
         .unlock = .{ .unlocked_list = unlocked_list },
         .post_girl = .{
             .post_girl_item_list = post_girls,
@@ -42,13 +49,22 @@ pub fn getMiscData(
         },
         .business_card = .init,
         .player_accessory = .{
-            .control_guise_avatar_id = basic_info.control_guise_avatar.toInt(),
+            .control_guise_avatar_id = properties.basic_info.control_guise_avatar.toInt(),
         },
     } });
 }
 
 const templates = Assets.templates;
 
+const ArrayList = std.ArrayList;
+
+const Message = handlers.Message;
+const Response = handlers.Response;
+
+const Properties = logic.Properties;
+const RealTimeClock = logic.RealTimeClock;
+
+const logic = @import("../../logic.zig");
 const Assets = @import("../../Assets.zig");
 const handlers = @import("../handlers.zig");
 

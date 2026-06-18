@@ -9,7 +9,7 @@ pub fn mutateAvatar(
     for (changes.avatars) |change| {
         const index = properties.avatar.indexes.get(change.id).?;
 
-        properties.avatar.metas[index] = change.meta;
+        properties.avatar.meta[index] = change.meta;
         properties.avatar.weapon_uids[index] = change.weapon_uid;
         properties.avatar.equipment_uids[index] = change.equipment_uids;
     }

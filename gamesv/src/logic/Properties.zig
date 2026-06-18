@@ -25,7 +25,7 @@ fn unlockAllAvatars(props: *Properties, at: Player) void {
         avatar.indexes.put(template.getId(), @intCast(i));
         avatar.ids[i] = template.getId();
 
-        avatar.metas[i] = .{
+        avatar.meta[i] = .{
             .level = .max,
             .exp = 0,
             .rank = .max,
@@ -36,7 +36,7 @@ fn unlockAllAvatars(props: *Properties, at: Player) void {
             .skin = .none,
         };
 
-        inline for (&avatar.metas[i].skill_levels, 0..) |*level, skill_type|
+        inline for (&avatar.meta[i].skill_levels, 0..) |*level, skill_type|
             level.* = .maxFor(@enumFromInt(skill_type));
 
         avatar.weapon_uids[i] = .none;

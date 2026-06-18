@@ -1,27 +1,35 @@
 pub fn enterWorld(
-    input: handlers.Input(pb.EnterWorldCsReq),
-    output: handlers.Output(pb.EnterWorldScRsp),
+    message: Message(pb.EnterWorldCsReq),
+    changes: Changes.Builder(.{
+        Changes.GameMode,
+    }),
+    response: Response(pb.EnterWorldScRsp),
 ) !void {
-    _ = input;
+    _ = message;
 
-    output.changes.switchGameMode(.{ .hall = .{
+    const mode_switch: Changes.GameMode = .{ .hall = .{
         .section_id = .MainCity_Street,
-    } });
+    } };
 
-    output.respond(.init);
+    changes.insert(mode_switch);
+    response.set(.init);
 }
 
 pub fn enterSectionComplete(
-    input: handlers.Input(pb.EnterSectionCompleteCsReq),
-    output: handlers.Output(pb.EnterSectionCompleteScRsp),
+    message: Message(pb.EnterSectionCompleteCsReq),
+    response: Response(pb.EnterSectionCompleteScRsp),
 ) !void {
-    _ = input;
-    output.respond(.init);
+    _ = message;
+    response.set(.init);
 }
 
-const templates = Assets.templates;
+const Message = handlers.Message;
+const Response = handlers.Response;
 
-const Assets = @import("../../Assets.zig");
+const Changes = logic.Changes;
+const Properties = logic.Properties;
+
+const logic = @import("../../logic.zig");
 const handlers = @import("../handlers.zig");
 
 const pb = @import("rmpb").main;
