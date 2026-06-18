@@ -68,15 +68,15 @@ pub fn Notify(comptime OutNotify: type) type {
 
         pub const Notify = OutNotify;
 
-        arena: Allocator,
+        allocator: Allocator,
         to_send: union(enum) {
             none: void,
             one: OutNotify,
             many: []const OutNotify,
         },
 
-        pub fn init(arena: Allocator) Out {
-            return .{ .arena = arena, .to_send = .none };
+        pub fn init(allocator: Allocator) Out {
+            return .{ .allocator = allocator, .to_send = .none };
         }
 
         pub fn one(out: *Out, notify: OutNotify) void {

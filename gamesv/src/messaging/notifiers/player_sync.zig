@@ -12,23 +12,23 @@ pub fn playerSync(
     var sync: pb.PlayerSyncScNotify = .init;
 
     sync.self_basic_info = try buildSelfBasicInfo(
-        notify.arena,
+        notify.allocator,
         properties.basic_info,
         changes.control_avatar,
         changes.control_guise_avatar,
     );
 
-    sync.avatar = try buildAvatarSync(notify.arena, changes.avatars);
+    sync.avatar = try buildAvatarSync(notify.allocator, changes.avatars);
 
     sync.misc = .{
-        .player_accessory = try buildPlayerAccessory(notify.arena, changes.control_guise_avatar),
+        .player_accessory = try buildPlayerAccessory(notify.allocator, changes.control_guise_avatar),
     };
 
     notify.one(sync);
 }
 
 fn buildSelfBasicInfo(
-    arena: Allocator,
+    allocator: Allocator,
     info: *const Properties.BasicInfo,
     control_avatar: ?logic.Changes.ControlAvatar,
     control_guise_avatar: ?logic.Changes.ControlGuiseAvatar,
@@ -36,18 +36,18 @@ fn buildSelfBasicInfo(
     if (control_avatar == null and control_guise_avatar == null)
         return null;
 
-    return try packers.packSelfBasicInfo(arena, info);
+    return try packers.packSelfBasicInfo(allocator, info);
 }
 
-fn buildAvatarSync(arena: Allocator, changes: []const logic.Changes.Avatar) !?pb.AvatarSync {
+fn buildAvatarSync(allocator: Allocator, changes: []const logic.Changes.Avatar) !?pb.AvatarSync {
     if (changes.len == 0) return null;
 
     var sync: pb.AvatarSync = .{
-        .avatar_list = try .initCapacity(arena, changes.len),
+        .avatar_list = try .initCapacity(allocator, changes.len),
     };
 
     for (changes) |change| sync.avatar_list.appendAssumeCapacity(try packers.packAvatarInfo(
-        arena,
+        allocator,
         change.id,
         &change.meta,
         change.weapon_uid,
@@ -58,10 +58,10 @@ fn buildAvatarSync(arena: Allocator, changes: []const logic.Changes.Avatar) !?pb
 }
 
 fn buildPlayerAccessory(
-    arena: Allocator,
+    allocator: Allocator,
     maybe_control_guise_avatar: ?logic.Changes.ControlGuiseAvatar,
 ) !?pb.PlayerAccessorySync {
-    _ = arena;
+    _ = allocator;
 
     const control_guise_avatar = maybe_control_guise_avatar orelse
         return null;
