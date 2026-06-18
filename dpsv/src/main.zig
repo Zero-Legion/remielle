@@ -1,8 +1,8 @@
 const log = std.log.scoped(.@"remielle-dpsv");
 
 pub const Options = struct {
-    slots: u32 = @import("config").slots,
     listen_address: []const u8 = @import("config").listen_address,
+    concurrent_connections_limit: u64 = @import("config").concurrent_connections_limit,
 };
 
 pub const std_options: std.Options = .{
@@ -39,11 +39,20 @@ pub fn main(init: Init.Minimal) void {
         error.OutOfMemory => fatal("failed to build static responses", .{}),
     };
 
+    const concurrency_units: Io.Limit = if (options.concurrent_connections_limit != 0)
+        // One extra for the initial `io.concurrent`
+        .limited64(1 +| @as(u64, @intCast(options.concurrent_connections_limit)))
+    else
+        .unlimited;
+
     var io_impl = if (rmio.RemiellIo.supported)
-        rmio.RemiellIo.init(gpa, .{ .coroutine_limit = .unlimited, .stack_size = 1024 * 128 }) catch |err|
+        rmio.RemiellIo.init(gpa, .{
+            .coroutine_limit = concurrency_units,
+            .stack_size = 1024 * 128,
+        }) catch |err|
             fatal("failed to init I/O implementation: {t}", .{err})
     else
-        std.Io.Threaded.init(gpa, .{});
+        Io.Threaded.init(gpa, .{ .concurrent_limit = concurrency_units });
 
     defer io_impl.deinit();
     const io = io_impl.io();
@@ -75,6 +84,7 @@ inline fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
 
 const is_debug = builtin.mode == .Debug;
 
+const Io = std.Io;
 const Init = std.process.Init;
 
 const heap = std.heap;
