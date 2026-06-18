@@ -6,6 +6,10 @@ pub fn playerLogin(
     response.set(.init);
 }
 
+pub fn keepAlive(message: Message(pb.KeepAliveNotify)) !void {
+    _ = message;
+}
+
 pub fn getSelfBasicInfo(
     message: Message(pb.GetSelfBasicInfoCsReq),
     properties: Properties.Immutable(.{
