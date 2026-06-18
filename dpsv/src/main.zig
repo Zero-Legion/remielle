@@ -10,18 +10,7 @@ pub const std_options: std.Options = .{
 };
 
 pub fn main(init: Init.Minimal) void {
-    var debug_allocator: heap.DebugAllocator(.{}) = .init;
-    defer if (is_debug) {
-        _ = debug_allocator.deinit();
-    };
-
-    const gpa = if (is_debug)
-        debug_allocator.allocator()
-    else
-        heap.smp_allocator;
-
-    var arena: heap.ArenaAllocator = .init(gpa);
-    defer if (is_debug) arena.deinit();
+    var arena: heap.ArenaAllocator = .init(heap.page_allocator);
 
     const args = init.args.toSlice(arena.allocator()) catch |err|
         fatal("failed to collect cli arguments: {t}", .{err});
@@ -46,13 +35,13 @@ pub fn main(init: Init.Minimal) void {
         .unlimited;
 
     var io_impl = if (rmio.RemiellIo.supported)
-        rmio.RemiellIo.init(gpa, .{
+        rmio.RemiellIo.init(heap.page_allocator, .{
             .coroutine_limit = concurrency_units,
             .stack_size = 1024 * 128,
         }) catch |err|
             fatal("failed to init I/O implementation: {t}", .{err})
     else
-        Io.Threaded.init(gpa, .{ .concurrent_limit = concurrency_units });
+        Io.Threaded.init(heap.page_allocator, .{ .concurrent_limit = concurrency_units });
 
     defer io_impl.deinit();
     const io = io_impl.io();
