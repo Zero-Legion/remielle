@@ -82,7 +82,7 @@ fn serve(io: Io, data: *const Data, stream: net.Stream) Io.Cancelable!void {
             => return,
         };
 
-        var response: routes.Response = undefined;
+        var response: routes.Response = .init;
         routes.process(data, &request_line, &response);
 
         if (!request_line.method.hasResponseBody()) {

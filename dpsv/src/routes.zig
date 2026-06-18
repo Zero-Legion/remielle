@@ -1,36 +1,55 @@
 const log = std.log.scoped(.@"remielle-dpsv::routes");
 
 pub const Response = struct {
-    const buffer_size: usize = 1024;
-
     buffer: [buffer_size]u8,
-    len: usize, // bytes in `buffer`
+    /// Amount of bytes copied into `buffer`.
+    /// After this, it's `undefined`.
+    buffer_end: usize,
+    /// Taken from `Data`.
     body: ?[]const u8,
 
-    pub fn fail(rsp: *Response, status: u16, reason: []const u8) void {
-        const string = fmt.bufPrint(
-            &rsp.buffer,
-            "HTTP/1.1 {0d} {1s}\r\nConnection: keep-alive\r\nContent-Length: {2d}\r\n\r\n{1s}",
-            .{ status, reason, reason.len },
-        ) catch unreachable;
+    pub const init: Response = .{
+        .buffer = undefined,
+        .buffer_end = 0,
+        .body = null,
+    };
 
-        rsp.len = string.len;
-        rsp.body = null;
-    }
+    // This is only used for the request line; in case of `fail` also for the reason phrase.
+    const buffer_size: usize = 1024;
 
-    pub fn ok(rsp: *Response, body: []const u8) void {
+    pub fn ok(
+        rsp: *Response,
+        /// Must be statically allocated and have a static lifetime.
+        body: []const u8,
+    ) void {
         const string = fmt.bufPrint(
             &rsp.buffer,
             "HTTP/1.1 200 OK\r\nConnection: keep-alive\r\nContent-Length: {d}\r\n\r\n",
             .{body.len},
         ) catch unreachable;
 
-        rsp.len = string.len;
+        rsp.buffer_end = string.len;
         rsp.body = body;
     }
 
+    pub fn fail(
+        rsp: *Response,
+        status: u16,
+        /// Will be copied into `rsp.buffer`.
+        reason: []const u8,
+    ) void {
+        const string = fmt.bufPrint(
+            &rsp.buffer,
+            "HTTP/1.1 {0d} {1s}\r\nConnection: keep-alive\r\nContent-Length: {2d}\r\n\r\n{1s}",
+            .{ status, reason, reason.len },
+        ) catch
+            unreachable; // `buffer_size` exceeded.
+
+        rsp.buffer_end = string.len;
+    }
+
     pub fn toSlices(rsp: *Response, slices_buf: *[2][]const u8) [][]const u8 {
-        slices_buf[0] = rsp.buffer[0..rsp.len];
+        slices_buf[0] = rsp.buffer[0..rsp.buffer_end];
         const body = rsp.body orelse return slices_buf[0..1];
 
         slices_buf[1] = body;
@@ -92,6 +111,5 @@ const fmt = std.fmt;
 
 const http = @import("http.zig");
 const Data = @import("Data.zig");
-const rmio = @import("rmio");
 
 const std = @import("std");
