@@ -3,6 +3,7 @@ arena: std.heap.ArenaAllocator,
 coro_storage: Coroutine.Storage,
 current_coro: ?*Coroutine,
 naked_wait: WaitPoint,
+wakeup_queue: DoublyLinkedList,
 csprng: ?DefaultCsprng,
 shutdown: enum(u2) {
     ignored = 0b00,
@@ -34,6 +35,7 @@ pub const InitOptions = struct {
 const WaitPoint = struct {
     awaitee: Awaitee,
     context: Io.fiber.Context,
+    wakeup_queue_node: DoublyLinkedList.Node,
 
     const Awaitee = union(enum) {
         /// The coroutine is not waiting on anything.
@@ -92,7 +94,12 @@ pub fn init(gpa: Allocator, options: InitOptions) InitError!RemiellIo {
         .arena = .init(gpa),
         .coro_storage = .init(options.coroutine_limit, options.stack_size),
         .current_coro = null,
-        .naked_wait = .{ .awaitee = .none, .context = undefined },
+        .naked_wait = .{
+            .awaitee = .none,
+            .wakeup_queue_node = .{},
+            .context = undefined,
+        },
+        .wakeup_queue = .{},
         .csprng = null,
         .shutdown = .ignored,
         .shutdown_wait_point = undefined,
@@ -140,15 +147,12 @@ const Coroutine = struct {
         limit: Io.Limit,
         stack_size: usize,
         free_list: SinglyLinkedList,
-        /// Queued to run on the next yield.
-        queued_list: SinglyLinkedList,
 
         pub fn init(limit: Io.Limit, stack_size: usize) Storage {
             return .{
                 .limit = limit,
                 .stack_size = stack_size,
                 .free_list = .{},
-                .queued_list = .{},
             };
         }
 
@@ -166,10 +170,6 @@ const Coroutine = struct {
             coro.buffer = try arena.alloc(u8, coro_storage.stack_size);
 
             return coro;
-        }
-
-        pub fn schedule(coro_storage: *Storage, coro: *Coroutine) void {
-            coro_storage.queued_list.prepend(&coro.list_node);
         }
 
         pub fn recycle(coro_storage: *Storage, coro: *Coroutine) void {
@@ -359,16 +359,20 @@ fn concurrent(
     coro.rio = rio;
     coro.awaiter = null;
 
-    coro.wait_point = .{ .awaitee = .none, .context = .{
-        .rsp = @intFromPtr(stack_pointer),
-        .rip = @intFromPtr(&Coroutine.startup.entry),
-        .rbp = 0,
-    } };
+    coro.wait_point = .{
+        .awaitee = .none,
+        .wakeup_queue_node = .{},
+        .context = .{
+            .rsp = @intFromPtr(stack_pointer),
+            .rip = @intFromPtr(&Coroutine.startup.entry),
+            .rbp = 0,
+        },
+    };
 
     @memcpy(owned_context_ptr[0..context.len], context);
     @memcpy(stack_pointer[0..8], std.mem.asBytes(&coro));
 
-    rio.coro_storage.schedule(coro);
+    rio.schedule(&coro.wait_point);
     return @ptrCast(coro);
 }
 
@@ -456,16 +460,20 @@ fn groupConcurrent(
     coro.rio = rio;
     coro.awaiter = null;
 
-    coro.wait_point = .{ .awaitee = .none, .context = .{
-        .rsp = @intFromPtr(stack_pointer),
-        .rip = @intFromPtr(&Coroutine.startup.entry),
-        .rbp = 0,
-    } };
+    coro.wait_point = .{
+        .awaitee = .none,
+        .wakeup_queue_node = .{},
+        .context = .{
+            .rsp = @intFromPtr(stack_pointer),
+            .rip = @intFromPtr(&Coroutine.startup.entry),
+            .rbp = 0,
+        },
+    };
 
     @memcpy(owned_context_ptr[0..context.len], context);
     @memcpy(stack_pointer[0..8], std.mem.asBytes(&coro));
 
-    rio.coro_storage.schedule(coro);
+    rio.schedule(&coro.wait_point);
 
     if (g.token.load(.monotonic)) |token| {
         const last_group_coro: *Coroutine = @ptrCast(@alignCast(token));
@@ -855,45 +863,24 @@ fn block(rio: *RemiellIo, reason: WaitReason) void {
         .await => |coro| .{ .coroutine = coro },
     };
 
-    wait_loop: while (!rio.waitPoint().awaitee.ready()) {
+    wait_loop: while (true) {
         if (rio.shutdown == .pending) {
             rio.shutdown = .acknowledged;
 
-            // Resume the shutdown awaiter
-            const wait_point = rio.shutdown_wait_point;
-            const maybe_coro: ?*Coroutine = if (wait_point == &rio.naked_wait)
-                null
-            else
-                @fieldParentPtr("wait_point", wait_point);
-
-            if (maybe_coro == rio.current_coro) {
+            if (!rio.wakeup(rio.shutdown_wait_point))
                 break :wait_loop;
-            }
-
-            const save_into = &rio.waitPoint().context;
-            rio.current_coro = maybe_coro;
-
-            _ = Io.fiber.contextSwitch(&.{
-                .old = save_into,
-                .new = &wait_point.context,
-            });
         }
 
-        while (rio.coro_storage.queued_list.popFirst()) |node| {
-            const next_coro: *Coroutine = @fieldParentPtr("list_node", node);
+        while (rio.wakeup_queue.popFirst()) |node| {
+            const wakeup_wait_point: *WaitPoint = @fieldParentPtr("wakeup_queue_node", node);
 
-            const save_into = &rio.waitPoint().context;
-            rio.current_coro = next_coro;
-
-            _ = Io.fiber.contextSwitch(&.{
-                .old = save_into,
-                .new = &next_coro.wait_point.context,
-            });
-
-            if (rio.waitPoint().awaitee.ready() or
-                reason == .shutdown and
-                    rio.shutdown == .acknowledged) break :wait_loop;
+            if (!rio.wakeup(wakeup_wait_point))
+                break :wait_loop;
         }
+
+        // Before entering a blocking syscall, make sure we aren't ready!
+        if (enter_wait_point.awaitee.ready() or (reason == .shutdown and rio.shutdown == .acknowledged))
+            break :wait_loop;
 
         _ = rio.impl.await() catch |err| if (is_debug)
             debug.panic("rio.impl.await: {t}", .{err})
@@ -913,31 +900,41 @@ fn block(rio: *RemiellIo, reason: WaitReason) void {
             awaitee.outstanding -= 1;
             if (awaitee.outstanding != 0) continue; // Some operations are still pending.
 
-            // Resume the coroutine
-
             const wait_point: *WaitPoint = @alignCast(@fieldParentPtr(
                 "awaitee",
                 @as(*WaitPoint.Awaitee, @fieldParentPtr("operation", awaitee)),
             ));
 
-            const maybe_coro: ?*Coroutine = if (wait_point == &rio.naked_wait)
-                null
-            else
-                @fieldParentPtr("wait_point", wait_point);
-
-            if (maybe_coro == rio.current_coro) {
-                break :wait_loop;
-            }
-
-            const save_into = &rio.waitPoint().context;
-            rio.current_coro = maybe_coro;
-
-            _ = Io.fiber.contextSwitch(&.{
-                .old = save_into,
-                .new = &wait_point.context,
-            });
+            rio.schedule(wait_point);
         }
     }
+}
+
+fn schedule(rio: *RemiellIo, wait_point: *WaitPoint) void {
+    rio.wakeup_queue.append(&wait_point.wakeup_queue_node);
+}
+
+/// Returns `false` if `wake_wait_point` is the current one.
+/// In which case, the caller should simply break out of the wait loop.
+fn wakeup(rio: *RemiellIo, wake_wait_point: *WaitPoint) bool {
+    const our_wait_point = rio.waitPoint();
+
+    if (our_wait_point == wake_wait_point)
+        return false;
+
+    const save_into = &our_wait_point.context;
+
+    rio.current_coro = if (wake_wait_point == &rio.naked_wait)
+        null
+    else
+        @fieldParentPtr("wait_point", wake_wait_point);
+
+    _ = Io.fiber.contextSwitch(&.{
+        .old = save_into,
+        .new = &wake_wait_point.context,
+    });
+
+    return true;
 }
 
 fn addVector(
@@ -1147,6 +1144,7 @@ const abort = std.process.abort;
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const SinglyLinkedList = std.SinglyLinkedList;
+const DoublyLinkedList = std.DoublyLinkedList;
 const DefaultCsprng = std.Random.DefaultCsprng;
 
 const net = std.Io.net;
