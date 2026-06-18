@@ -65,10 +65,7 @@ fn buildRegionListMap(arena: Allocator) Allocator.Error!RegionListMap {
 
         map.putAssumeCapacity(
             @tagName(version),
-            try std.fmt.allocPrint(arena, "{f}", .{std.json.fmt(
-                .{ .retcode = 0, .region_list = region_list },
-                .{},
-            )}),
+            try stringify(arena, .{ .retcode = 0, .region_list = region_list }),
         );
     }
 
@@ -91,7 +88,7 @@ fn buildGatewayMap(arena: Allocator) Allocator.Error!GatewayMap {
             const server = @field(config.servers, server_name);
             const server_tag = @field(Server, server_name);
 
-            const data = .{
+            const plaintext = try stringify(arena, .{
                 .retcode = 0,
                 .title = server.title,
                 .region_name = server_name,
@@ -99,13 +96,7 @@ fn buildGatewayMap(arena: Allocator) Allocator.Error!GatewayMap {
                 .gateway = server.gateway,
                 .region_ext = .{ .func_switch = .{ .isKcp = 1 } },
                 .cdn_conf_ext = version.cdn_conf,
-            };
-
-            const plaintext = try std.fmt.allocPrint(
-                arena,
-                "{f}",
-                .{std.json.fmt(data, .{})},
-            );
+            });
 
             const num_blocks = std.math.divCeil(usize, plaintext.len, rmcrypt.rsa.max_unpadded_size) catch
                 unreachable; // `max_unpadded_size` is nonzero.
@@ -124,19 +115,64 @@ fn buildGatewayMap(arena: Allocator) Allocator.Error!GatewayMap {
             var sign: [rmcrypt.rsa.block_size]u8 = undefined;
             rmcrypt.rsa.server_private_key.sign(plaintext, &sign);
 
-            map.putAssumeCapacity(
-                .{ .version = version_tag, .server = server_tag },
-                try std.fmt.allocPrint(arena,
-                    \\{{"content": "{b64}", "sign": "{b64}"}}
-                , .{ blocks, &sign }),
-            );
+            const before_content =
+                \\{"content": "
+            ;
+            const before_sign =
+                \\", "sign": "
+            ;
+
+            const end =
+                \\"}
+            ;
+
+            const blocks_encoded_len = Base64Encoder.calcSize(blocks.len);
+            const sign_encoded_len = Base64Encoder.calcSize(sign.len);
+            const len = blocks_encoded_len + sign_encoded_len + before_content.len + before_sign.len + end.len;
+
+            const string = try arena.alloc(u8, len);
+            var cursor = string;
+
+            @memcpy(cursor[0..before_content.len], before_content);
+            cursor = cursor[before_content.len..];
+
+            _ = Base64Encoder.encode(cursor[0..blocks_encoded_len], blocks);
+            cursor = cursor[blocks_encoded_len..];
+
+            @memcpy(cursor[0..before_sign.len], before_sign);
+            cursor = cursor[before_sign.len..];
+
+            _ = Base64Encoder.encode(cursor[0..sign_encoded_len], &sign);
+            cursor = cursor[sign_encoded_len..];
+
+            @memcpy(cursor, end);
+
+            map.putAssumeCapacity(.{ .version = version_tag, .server = server_tag }, string);
         }
     }
 
     return map;
 }
 
+fn stringify(allocator: Allocator, data: anytype) Allocator.Error![]const u8 {
+    // std.fmt.allocPrint uses Io.Writer.Allocating
+    // with initial capacity being length of the format string.
+    // This will lead to unnecessary re-allocations,
+    // so let's allocate everything ourselves instead.
+
+    const fmt = json.fmt(data, .{});
+    const len = std.fmt.count("{f}", .{fmt});
+    const buf = try allocator.alloc(u8, len);
+    const string = std.fmt.bufPrint(buf, "{f}", .{fmt}) catch unreachable;
+    std.debug.assert(buf.len == string.len);
+
+    return string;
+}
+
 const Allocator = std.mem.Allocator;
+const Base64Encoder = std.base64.standard.Encoder;
+
+const json = std.json;
 
 const rmcrypt = @import("rmcrypt");
 const std = @import("std");

@@ -30,7 +30,7 @@ pub fn main(init: Init.Minimal) void {
 
     const concurrency_units: Io.Limit = if (options.concurrent_connections_limit != 0)
         // One extra for the initial `io.concurrent`
-        .limited64(1 +| @as(u64, @intCast(options.concurrent_connections_limit)))
+        .limited64(1 +| options.concurrent_connections_limit)
     else
         .unlimited;
 
@@ -68,17 +68,14 @@ pub fn main(init: Init.Minimal) void {
 
 inline fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
     log.err(fmt, args);
-    exit(1);
+    std.process.exit(1);
 }
-
-const is_debug = builtin.mode == .Debug;
 
 const Io = std.Io;
 const Init = std.process.Init;
 
 const heap = std.heap;
 const net = std.Io.net;
-const exit = std.process.exit;
 
 const app = @import("app.zig");
 const Data = @import("Data.zig");
@@ -86,4 +83,3 @@ const Data = @import("Data.zig");
 const std = @import("std");
 const rmio = @import("rmio");
 const rmcli = @import("rmcli");
-const builtin = @import("builtin");
