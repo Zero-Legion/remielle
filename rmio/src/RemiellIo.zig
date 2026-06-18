@@ -866,21 +866,17 @@ fn block(rio: *RemiellIo, reason: WaitReason) void {
     wait_loop: while (true) {
         if (rio.shutdown == .pending) {
             rio.shutdown = .acknowledged;
-
-            if (!rio.wakeup(rio.shutdown_wait_point))
-                break :wait_loop;
+            rio.schedule(rio.shutdown_wait_point);
         }
 
-        while (rio.wakeup_queue.popFirst()) |node| {
+        if (rio.wakeup_queue.popFirst()) |node| {
             const wakeup_wait_point: *WaitPoint = @fieldParentPtr("wakeup_queue_node", node);
 
             if (!rio.wakeup(wakeup_wait_point))
                 break :wait_loop;
-        }
 
-        // Before entering a blocking syscall, make sure we aren't ready!
-        if (enter_wait_point.awaitee.ready() or (reason == .shutdown and rio.shutdown == .acknowledged))
             break :wait_loop;
+        }
 
         _ = rio.impl.await() catch |err| if (is_debug)
             debug.panic("rio.impl.await: {t}", .{err})
