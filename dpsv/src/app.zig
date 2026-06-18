@@ -8,7 +8,10 @@ pub fn listen(
     data: *const Data,
     address: *const net.IpAddress,
 ) Io.Cancelable!void {
-    var server = address.listen(io, .{ .reuse_address = true }) catch |err| switch (err) {
+    var server = address.listen(io, .{
+        .reuse_address = true,
+        .kernel_backlog = accept_backlog,
+    }) catch |err| switch (err) {
         error.AddressInUse => fatal(
             "the address {f} is already in use; another instance of this server might be already running",
             .{address},
@@ -53,7 +56,7 @@ fn serve(io: Io, data: *const Data, stream: net.Stream) Io.Cancelable!void {
     // https://codeberg.org/ziglang/zig/commit/2b48f559f424d8bf790bf54f4bb83d631461a681
     defer stream.close(io);
 
-    var request_buffer: [1024]u8 = undefined;
+    var request_buffer: [buffer_size]u8 = undefined;
     var request_reader = stream.reader(io, &request_buffer);
 
     const request_line = http.RequestLine.parse(&request_reader.interface) catch |err| switch (err) {
