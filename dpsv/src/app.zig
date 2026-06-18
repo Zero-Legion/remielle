@@ -58,41 +58,67 @@ fn serve(io: Io, data: *const Data, stream: net.Stream) Io.Cancelable!void {
 
     var request_buffer: [buffer_size]u8 = undefined;
     var request_reader = stream.reader(io, &request_buffer);
-
-    const request_line = http.RequestLine.parse(&request_reader.interface) catch |err| switch (err) {
-        error.ReadFailed => switch (request_reader.err.?) {
-            error.Canceled => |e| return e,
-            else => return,
-        },
-        error.StreamTooLong => {
-            log.debug(
-                "the request stream from {f} was too long to fit into request_buffer.",
-                .{stream.socket.address},
-            );
-            return;
-        },
-        error.EndOfStream,
-        error.MissingComponents,
-        error.UnsupportedMethod,
-        => return,
-    };
-
-    var result = routes.process(data, &request_line);
-
-    if (!request_line.method.hasResponseBody()) {
-        result.body = null;
-    }
-
-    var slices_buf: [2][]const u8 = undefined;
-    const slices = result.toSlices(&slices_buf);
+    const reader = &request_reader.interface;
 
     var unbuffered_writer = stream.writer(io, &.{});
-    unbuffered_writer.interface.writeVecAll(slices) catch |err| switch (err) {
-        error.WriteFailed => switch (unbuffered_writer.err.?) {
-            error.Canceled => |e| return e,
-            else => return,
-        },
-    };
+    const writer = &unbuffered_writer.interface;
+
+    while (true) {
+        const request_line = http.RequestLine.parse(reader) catch |err| switch (err) {
+            error.ReadFailed => switch (request_reader.err.?) {
+                error.Canceled => |e| return e,
+                else => return,
+            },
+            error.StreamTooLong => {
+                log.debug(
+                    "the request stream from {f} was too long to fit into request_buffer.",
+                    .{stream.socket.address},
+                );
+                return;
+            },
+            error.EndOfStream,
+            error.MissingComponents,
+            error.UnsupportedMethod,
+            => return,
+        };
+
+        var response: routes.Response = undefined;
+        routes.process(data, &request_line, &response);
+
+        if (!request_line.method.hasResponseBody()) {
+            response.body = null;
+        }
+
+        var slices_buf: [2][]const u8 = undefined;
+        const slices = response.toSlices(&slices_buf);
+
+        writer.writeVecAll(slices) catch |err| switch (err) {
+            error.WriteFailed => switch (unbuffered_writer.err.?) {
+                error.Canceled => |e| return e,
+                else => return,
+            },
+        };
+
+        discardHeaders(reader) catch |err| switch (err) {
+            error.UnexpectedChar, error.EndOfStream => return,
+            error.ReadFailed => switch (request_reader.err.?) {
+                error.Canceled => |e| return e,
+                else => return,
+            },
+        };
+    }
+}
+
+fn discardHeaders(reader: *Io.Reader) !void {
+    while (true) {
+        const discarded = try reader.discardDelimiterInclusive('\r');
+        const maybe_newline = try reader.takeByte();
+        if (maybe_newline != '\n') return error.UnexpectedChar;
+
+        if (discarded == 1)
+            // Only the '\r' itself was discarded, this is the end.
+            return;
+    }
 }
 
 fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
