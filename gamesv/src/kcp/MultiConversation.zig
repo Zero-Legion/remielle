@@ -241,8 +241,8 @@ const Storage = struct {
 
         rx: [capacity]Rx,
 
-        pub fn initPinned(uninit: *Bucket) void {
-            for (uninit.nodes[0 .. capacity - 1], 1..) |*node, next|
+        pub fn initPinned(uninit: *Bucket, base_index: u32) void {
+            for (uninit.nodes[0 .. capacity - 1], (base_index + 1)..) |*node, next|
                 node.next = @enumFromInt(@as(u32, @intCast(next)));
 
             uninit.nodes[capacity - 1].next = .none;
@@ -319,12 +319,13 @@ pub fn create(
         .none => {
             // Allocate a new bucket.
             const bucket = try arena.create(Storage.Bucket);
-            bucket.initPinned();
-
             const bucket_index: u32 = @intCast(mc.storage.buckets.items.len);
+            const bucket_base = bucket_index * Storage.Bucket.capacity;
+
+            bucket.initPinned(bucket_base);
             try mc.storage.buckets.append(arena, bucket);
 
-            continue :take_index @enumFromInt(bucket_index * Storage.Bucket.capacity);
+            continue :take_index @enumFromInt(bucket_base);
         },
         _ => |free| free: {
             const index = free.toInt();
