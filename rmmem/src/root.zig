@@ -20,6 +20,23 @@ fn SoaBucket(comptime capacity: usize, comptime Struct: type) type {
     return @Struct(.auto, null, &field_names, &field_types, &@splat(.{}));
 }
 
+pub fn suggestBucketSize(comptime desired_size: usize, comptime Struct: type) usize {
+    const desired_bytes = @sizeOf(SoaBucket(desired_size, Struct));
+    if (desired_bytes % heap.page_size_min == 0)
+        return desired_size;
+
+    const desired_pages = std.math.divCeil(usize, desired_bytes, heap.page_size_min) catch unreachable;
+    var suggested_size = desired_size;
+
+    while (std.math.divCeil(
+        usize,
+        @sizeOf(SoaBucket(suggested_size + 1, Struct)),
+        heap.page_size_min,
+    ) catch unreachable == desired_pages) : (suggested_size += 1) {}
+
+    return suggested_size;
+}
+
 pub fn RemielleArrayList(
     comptime bucket_size: usize,
     comptime Struct: type,

@@ -254,7 +254,7 @@ const List = struct {
     pub const Node = struct { next: OptionalIndex };
 };
 
-const Storage = rmmem.RemielleArrayList(64, struct {
+const Conversation = struct {
     identifier: Identifier,
     node: List.Node,
     rings: *Rings,
@@ -264,7 +264,13 @@ const Storage = rmmem.RemielleArrayList(64, struct {
 
     rx: Rx,
     undrained: bool,
-}, u32);
+};
+
+const Storage = rmmem.RemielleArrayList(
+    rmmem.suggestBucketSize(64, Conversation),
+    Conversation,
+    u32,
+);
 
 storage: Storage,
 free: List,
