@@ -30,10 +30,10 @@ pub fn initAlloc(
     csprng: Random,
     max_concurrent_sessions: usize,
 ) Allocator.Error!void {
-    try uninit.multi_conversation.initAlloc(arena, max_concurrent_sessions);
     try uninit.cvars.initAlloc(arena, max_concurrent_sessions);
     try uninit.output.initAlloc(arena, max_concurrent_sessions);
 
+    uninit.multi_conversation = .init;
     uninit.conv_counter = .init;
     uninit.conv_map = .empty;
     try uninit.conv_map.ensureTotalCapacity(arena, max_concurrent_sessions);
