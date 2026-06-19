@@ -204,110 +204,75 @@ pub const Identifier = struct {
     token: kcp.Token,
 };
 
-const Storage = struct {
-    buckets: std.ArrayList(*Bucket), // Not using linked list for sake of O(1) indexing.
+const Rings = struct {
+    node: SinglyLinkedList.Node,
+    send: SendRing,
+    recv: RecvRing,
+    ack: AckRing,
 
-    const init: Storage = .{
-        .buckets = .empty,
-    };
+    const Pool = struct {
+        pub const init: Pool = .{ .free = .{} };
 
-    inline fn get(
-        storage: *Storage,
-        comptime field: @EnumLiteral(),
-        index: usize,
-    ) @typeInfo(@FieldType(Bucket, @tagName(field))).array.child {
-        const bucket = storage.buckets.items[index / Bucket.capacity];
-        return @field(bucket, @tagName(field))[index % Bucket.capacity];
-    }
+        free: SinglyLinkedList,
 
-    inline fn getPtr(
-        storage: *Storage,
-        comptime field: @EnumLiteral(),
-        index: usize,
-    ) *@typeInfo(@FieldType(Bucket, @tagName(field))).array.child {
-        const bucket = storage.buckets.items[index / Bucket.capacity];
-        return &@field(bucket, @tagName(field))[index % Bucket.capacity];
-    }
+        fn create(pool: *Pool, arena: Allocator) Allocator.Error!*Rings {
+            if (pool.free.popFirst()) |node|
+                return @alignCast(@fieldParentPtr("node", node));
 
-    fn swapUndrained(storage: *Storage, index: usize, value: bool) bool {
-        const bucket = storage.buckets.items[index / Bucket.capacity];
-        const old_value = bucket.undrained.isSet(index % Bucket.capacity);
-        bucket.undrained.setValue(index % Bucket.capacity, value);
-        return old_value;
-    }
-
-    const Bucket = struct {
-        pub const capacity = 64;
-
-        identifiers: [capacity]Identifier,
-        nodes: [capacity]List.Node,
-        rings: [capacity]*Rings,
-
-        start_time: [capacity]kcp.Timeval,
-        last_update: [capacity]kcp.Timeval,
-
-        rx: [capacity]Rx,
-        undrained: std.StaticBitSet(capacity),
-
-        fn initPinned(uninit: *Bucket, base_index: u32) void {
-            for (uninit.nodes[0 .. capacity - 1], (base_index + 1)..) |*node, next|
-                node.next = @enumFromInt(@as(u32, @intCast(next)));
-
-            uninit.nodes[capacity - 1].next = .none;
-            uninit.undrained = .empty;
+            return arena.create(Rings);
         }
-    };
 
-    const Rings = struct {
-        node: SinglyLinkedList.Node,
-        send: SendRing,
-        recv: RecvRing,
-        ack: AckRing,
-
-        const Pool = struct {
-            pub const init: Pool = .{ .free = .{} };
-
-            free: SinglyLinkedList,
-
-            fn create(pool: *Pool, arena: Allocator) Allocator.Error!*Rings {
-                if (pool.free.popFirst()) |node|
-                    return @alignCast(@fieldParentPtr("node", node));
-
-                return arena.create(Rings);
-            }
-
-            inline fn recycle(pool: *Pool, rings: *Rings) void {
-                pool.free.prepend(&rings.node);
-            }
-        };
-    };
-
-    const OptionalIndex = enum(u32) {
-        none = std.math.maxInt(u32),
-        _,
-
-        pub fn toInt(oi: OptionalIndex) u32 {
-            std.debug.assert(oi != .none);
-            return @intFromEnum(oi);
+        inline fn recycle(pool: *Pool, rings: *Rings) void {
+            pool.free.prepend(&rings.node);
         }
-    };
-
-    const List = struct {
-        head: OptionalIndex,
-
-        pub const empty: List = .{ .head = .none };
-
-        pub const Node = struct { next: OptionalIndex };
     };
 };
 
+const OptionalIndex = enum(u32) {
+    none = std.math.maxInt(u32),
+    _,
+
+    pub fn toInt(oi: OptionalIndex) u32 {
+        std.debug.assert(oi != .none);
+        return @intFromEnum(oi);
+    }
+};
+
+fn initBucket(uninit: *Storage.Bucket, base_index: u32) void {
+    for (uninit.node[0 .. Storage.bucket_capacity - 1], (base_index + 1)..) |*node, next|
+        node.next = @enumFromInt(@as(u32, @intCast(next)));
+
+    uninit.node[Storage.bucket_capacity - 1].next = .none;
+    uninit.undrained = .empty;
+}
+
+const List = struct {
+    head: OptionalIndex,
+
+    pub const empty: List = .{ .head = .none };
+
+    pub const Node = struct { next: OptionalIndex };
+};
+
+const Storage = rmmem.RemielleArrayList(64, struct {
+    identifier: Identifier,
+    node: List.Node,
+    rings: *Rings,
+
+    start_time: kcp.Timeval,
+    last_update: kcp.Timeval,
+
+    rx: Rx,
+    undrained: bool,
+}, u32);
+
 storage: Storage,
-free: Storage.List,
-undrained: Storage.List,
-rings_pool: Storage.Rings.Pool,
+free: List,
+undrained: List,
+rings_pool: Rings.Pool,
 
 pub const init: MultiConversation = .{
-    .storage = .init,
+    .storage = .empty,
     .free = .{ .head = .none },
     .undrained = .{ .head = .none },
     .rings_pool = .init,
@@ -315,7 +280,7 @@ pub const init: MultiConversation = .{
 
 pub fn destroy(mc: *MultiConversation, conv_idx: u32) void {
     mc.rings_pool.recycle(mc.storage.get(.rings, conv_idx));
-    mc.storage.getPtr(.nodes, conv_idx).next = mc.free.head;
+    mc.storage.getPtr(.node, conv_idx).next = mc.free.head;
     mc.free.head = @enumFromInt(conv_idx);
 }
 
@@ -325,33 +290,32 @@ pub fn create(
     conv_id: kcp.ConvId,
     token: kcp.Token,
     start_time: Io.Timestamp,
-) Allocator.Error!Storage.OptionalIndex {
+) Allocator.Error!OptionalIndex {
     const global_index = take_index: switch (mc.free.head) {
         .none => {
-            // Allocate a new bucket.
-            const bucket = try arena.create(Storage.Bucket);
-            const bucket_index: u32 = @intCast(mc.storage.buckets.items.len);
-            const bucket_base = bucket_index * Storage.Bucket.capacity;
+            const bucket_index: u32 = @intCast(mc.storage.mapOne() catch
+                return error.OutOfMemory);
 
-            bucket.initPinned(bucket_base);
-            try mc.storage.buckets.append(arena, bucket);
+            const bucket = mc.storage.buckets.items[bucket_index];
+            const bucket_base = bucket_index * Storage.bucket_capacity;
 
+            initBucket(bucket, @intCast(bucket_base));
             continue :take_index @enumFromInt(bucket_base);
         },
         _ => |free| free: {
             const index = free.toInt();
-            const node = mc.storage.getPtr(.nodes, index);
+            const node = mc.storage.getPtr(.node, index);
             mc.free.head = node.next;
             node.next = .none;
             break :free index;
         },
     };
 
-    const bucket = mc.storage.buckets.items[global_index / Storage.Bucket.capacity];
-    const index = global_index % Storage.Bucket.capacity;
+    const bucket = mc.storage.buckets.items[global_index / Storage.bucket_capacity];
+    const index = global_index % Storage.bucket_capacity;
 
     errdefer {
-        mc.storage.getPtr(.nodes, global_index).next = mc.free.head;
+        mc.storage.getPtr(.node, global_index).next = mc.free.head;
         mc.free.head = @enumFromInt(index);
     }
 
@@ -362,7 +326,7 @@ pub fn create(
     rings.recv.reset();
     rings.ack.reset();
 
-    bucket.identifiers[index] = .{ .id = conv_id, .token = token };
+    bucket.identifier[index] = .{ .id = conv_id, .token = token };
     bucket.rings[index] = rings;
     bucket.start_time[index] = .fromTimestamp(start_time);
     bucket.last_update[index] = .zero;
@@ -458,7 +422,7 @@ pub const Reader = struct {
 };
 
 pub inline fn identifierAt(mc: *MultiConversation, index: u32) Identifier {
-    return mc.storage.get(.identifiers, index);
+    return mc.storage.get(.identifier, index);
 }
 
 pub fn reader(mc: *MultiConversation, index: u32) ?Reader {
@@ -569,8 +533,8 @@ pub fn writer(mc: *MultiConversation, client: u32, size: usize) AllocWriterError
         ring.xmit[index] = 0;
     }
 
-    if (!mc.storage.swapUndrained(client, true)) {
-        mc.storage.getPtr(.nodes, client).next = mc.undrained.head;
+    if (!mc.storage.swapBit(.undrained, client, true)) {
+        mc.storage.getPtr(.node, client).next = mc.undrained.head;
         mc.undrained.head = @enumFromInt(client);
     }
 
@@ -633,8 +597,8 @@ pub fn fillAt(mc: *MultiConversation, client_index: u32, data: []const u8) !void
     if (has_acks)
         rings.send.markFastack(maxack, latest_ts);
 
-    if (!mc.storage.swapUndrained(client_index, true)) {
-        mc.storage.getPtr(.nodes, client_index).next = mc.undrained.head;
+    if (!mc.storage.swapBit(.undrained, client_index, true)) {
+        mc.storage.getPtr(.node, client_index).next = mc.undrained.head;
         mc.undrained.head = @enumFromInt(client_index);
     }
 }
@@ -644,12 +608,12 @@ pub fn nextUndrained(mc: *MultiConversation) ?u32 {
         .none => null,
         _ => |oi| take: {
             const index = oi.toInt();
-            const node = mc.storage.getPtr(.nodes, index);
+            const node = mc.storage.getPtr(.node, index);
 
             mc.undrained.head = node.next;
             node.next = .none;
 
-            _ = mc.storage.swapUndrained(index, false);
+            _ = mc.storage.swapBit(.undrained, index, false);
 
             break :take index;
         },
@@ -673,7 +637,7 @@ pub const DrainIterator = union(enum) {
 // Returns the amount of bytes drained.
 // This function should be called repeatedly, while `DrainIterator` is not at end.
 pub fn drainAt(mc: *MultiConversation, client: u32, it: *DrainIterator, output: *[kcp.mtu]u8) usize {
-    const identifier = mc.storage.get(.identifiers, client);
+    const identifier = mc.storage.get(.identifier, client);
     const current = mc.storage.get(.last_update, client);
     const rings = mc.storage.get(.rings, client);
 
@@ -786,5 +750,6 @@ const SinglyLinkedList = std.SinglyLinkedList;
 
 const kcp = @import("../kcp.zig");
 
+const rmmem = @import("rmmem");
 const std = @import("std");
 const MultiConversation = @This();

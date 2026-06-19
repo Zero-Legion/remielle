@@ -4,6 +4,7 @@ const stable_protos: []const []const u8 = &.{
 
 pub fn build(b: *Build) void {
     const rmio = b.createModule(.{ .root_source_file = b.path("rmio/src/root.zig") });
+    const rmmem = b.createModule(.{ .root_source_file = b.path("rmmem/src/root.zig") });
     const rmcli = b.createModule(.{ .root_source_file = b.path("rmcli/src/root.zig") });
     const rmcrypt = b.createModule(.{ .root_source_file = b.path("rmcrypt/src/root.zig") });
 
@@ -88,6 +89,7 @@ pub fn build(b: *Build) void {
             .root_source_file = b.path("gamesv/src/main.zig"),
             .imports = &.{
                 .{ .name = "rmio", .module = rmio },
+                .{ .name = "rmmem", .module = rmmem },
                 .{ .name = "rmcli", .module = rmcli },
                 .{ .name = "rmcrypt", .module = rmcrypt },
                 .{ .name = "rmpb", .module = rmpb },
