@@ -34,7 +34,11 @@ pub fn notifyLogicChanges(
 
                 // Accepting mutable properties is intentionally not allowed.
                 if (@hasField(ArgType, logic.Properties.immutable_subset_marker_name)) {
-                    arg.* = frame.cvars.properties.extractFor(ArgType, frame.target_index);
+                    arg.* = logic.Properties.extractFor(
+                        frame.properties,
+                        ArgType,
+                        frame.target_index,
+                    );
                     continue;
                 }
 
@@ -53,7 +57,7 @@ pub fn notifyLogicChanges(
 
             for (notifies) |message| try messaging.send(
                 frame.multi_conversation,
-                frame.cvars,
+                frame.clients,
                 frame.target_index,
                 .notify,
                 message,

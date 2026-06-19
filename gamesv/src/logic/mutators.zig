@@ -23,7 +23,11 @@ pub fn dispatchLogicChanges(frame: *const Server.Frame, changes: *const logic.Ch
                 if (@hasField(ArgType, logic.Properties.immutable_subset_marker_name) or
                     @hasField(ArgType, logic.Properties.mutable_subset_marker_name))
                 {
-                    arg.* = frame.cvars.properties.extractFor(ArgType, frame.target_index);
+                    arg.* = logic.Properties.extractFor(
+                        frame.properties,
+                        ArgType,
+                        frame.target_index,
+                    );
                     continue;
                 }
 

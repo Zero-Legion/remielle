@@ -101,7 +101,7 @@ pub const Ack = enum(u32) {
 
 pub fn send(
     multi_conversation: *kcp.MultiConversation,
-    cvars: *ClientVariables,
+    clients: *Clients,
     destination_index: u32,
     ack: Ack,
     message: anytype,
@@ -109,7 +109,7 @@ pub fn send(
     const cmd_id = (comptime rmpb.cmdId(@TypeOf(message))) orelse return;
 
     const head: rmpb.stable.PacketHead = .{
-        .packet_id = cvars.packet_counters[destination_index].nextId(),
+        .packet_id = clients.getPtr(.packet_counter, destination_index).nextId(),
         .ack_packet_id = @intFromEnum(ack),
     };
 
@@ -118,7 +118,7 @@ pub fn send(
 
     encode(
         &writer.interface,
-        &cvars.xorpads[destination_index],
+        clients.getPtr(.xorpad, destination_index),
         cmd_id,
         head,
         message,
@@ -127,7 +127,7 @@ pub fn send(
 
 pub fn sendDummy(
     multi_conversation: *kcp.MultiConversation,
-    cvars: *ClientVariables,
+    clients: *Clients,
     destination_index: u32,
     ack: Ack,
 ) SendError!void {
@@ -141,13 +141,13 @@ pub fn sendDummy(
     };
 
     const dummy: DummyCmd = .{};
-    return send(multi_conversation, cvars, destination_index, ack, dummy);
+    return send(multi_conversation, clients, destination_index, ack, dummy);
 }
 
 const readInt = std.mem.readInt;
 
 const Io = std.Io;
-const ClientVariables = Server.ClientVariables;
+const Clients = Server.Clients;
 
 const heap = std.heap;
 

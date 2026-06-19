@@ -51,19 +51,19 @@ pub fn process(
     const head = messaging.decodePacketHead(head_bytes) orelse
         return error.DecodeFail;
 
-    var xored_reader = frame.cvars.xorpads[frame.target_index].wrapReader(reader, msg_header.body_len);
+    var xored_reader = frame.clients.getPtr(.xorpad, frame.target_index).wrapReader(reader, msg_header.body_len);
 
     const cmd_id = std.enums.fromInt(CmdId, msg_header.cmd_id) orelse {
         log.warn(
             "unhandled message with cmd_id {d} from {f}",
-            .{ msg_header.cmd_id, frame.cvars.addrs[frame.target_index] },
+            .{ msg_header.cmd_id, frame.clients.get(.addr, frame.target_index) },
         );
 
         if (head.packet_id == 0) return;
 
         try messaging.sendDummy(
             frame.multi_conversation,
-            frame.cvars,
+            frame.clients,
             frame.target_index,
             .ack(head.packet_id),
         );
@@ -129,7 +129,12 @@ pub fn process(
 
                                     // Accepting mutable properties is intentionally not allowed.
                                     if (@hasField(ArgType, logic.Properties.immutable_subset_marker_name)) {
-                                        arg.* = frame.cvars.properties.extractFor(ArgType, frame.target_index);
+                                        arg.* = logic.Properties.extractFor(
+                                            frame.properties,
+                                            ArgType,
+                                            frame.target_index,
+                                        );
+
                                         continue;
                                     }
                                 },
@@ -165,7 +170,7 @@ pub fn process(
                         if (rmpb.cmdId(Rsp.Data) != null) {
                             try messaging.send(
                                 frame.multi_conversation,
-                                frame.cvars,
+                                frame.clients,
                                 frame.target_index,
                                 .ack(head.packet_id),
                                 out_message,
@@ -173,14 +178,14 @@ pub fn process(
                         } else {
                             try messaging.sendDummy(
                                 frame.multi_conversation,
-                                frame.cvars,
+                                frame.clients,
                                 frame.target_index,
                                 .ack(head.packet_id),
                             );
 
                             log.debug(
                                 InMessage.log_prefix ++ "response is not described; sent dummy to {f}",
-                                .{frame.cvars.addrs[frame.target_index]},
+                                .{frame.clients.get(.addr, frame.target_index)},
                             );
                         }
                     }
@@ -188,7 +193,7 @@ pub fn process(
 
                 log.debug(
                     "processed message of type " ++ InMessage.Data.pb_desc_name ++ " from {f}",
-                    .{frame.cvars.addrs[frame.target_index]},
+                    .{frame.clients.get(.addr, frame.target_index)},
                 );
 
                 break :lookup;

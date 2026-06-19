@@ -1,7 +1,8 @@
 const log = std.log.scoped(.@"remielle-gamesv");
 
 multi_conversation: kcp.MultiConversation,
-cvars: ClientVariables,
+clients: Clients,
+properties: logic.Properties.List,
 conv_counter: kcp.ConvId.Counter,
 /// ConvId -> session index
 conv_map: array_hash_map.Auto(kcp.ConvId, u32),
@@ -9,10 +10,19 @@ conv_map: array_hash_map.Auto(kcp.ConvId, u32),
 conv_random: u64,
 per_message_arena: *heap.ArenaAllocator,
 
+pub const Client = struct {
+    packet_counter: PacketCounter,
+    xorpad: messaging.Xorpad,
+    addr: net.IpAddress,
+};
+
+pub const Clients = rmmem.RemielleArrayList(rmmem.suggestBucketSize(64, Client), Client, u32);
+
 pub const Frame = struct {
     target_index: u32,
     time: Io.Timestamp,
-    cvars: *ClientVariables,
+    clients: *Clients,
+    properties: *logic.Properties.List,
     multi_conversation: *kcp.MultiConversation,
 
     pub inline fn player(frame: *const Frame) logic.Properties.Player {
@@ -20,23 +30,20 @@ pub const Frame = struct {
     }
 };
 
-pub fn initAlloc(
-    uninit: *Server,
-    /// Used for persistent server state allocations.
-    arena: Allocator,
+pub fn init(
     /// Used for per-message allocations
     per_message_arena: *heap.ArenaAllocator,
     csprng: Random,
-    max_concurrent_sessions: usize,
-) Allocator.Error!void {
-    try uninit.cvars.initAlloc(arena, max_concurrent_sessions);
-
-    uninit.multi_conversation = .init;
-    uninit.conv_counter = .init;
-    uninit.conv_map = .empty;
-
-    uninit.conv_random = csprng.int(u64);
-    uninit.per_message_arena = per_message_arena;
+) Server {
+    return .{
+        .multi_conversation = .init,
+        .conv_counter = .init,
+        .conv_map = .empty,
+        .clients = .empty,
+        .properties = .empty,
+        .conv_random = csprng.int(u64),
+        .per_message_arena = per_message_arena,
+    };
 }
 
 pub fn receiveControlPacket(
@@ -113,7 +120,9 @@ pub fn onAuthSucceeded(
     messaging.encode(&writer.interface, .initial, cmd_id, .init, auth_response) catch unreachable;
 
     try server.conv_map.put(arena, conv_id, client);
-    server.initAt(client, from.*, key);
+    errdefer _ = server.conv_map.swapRemove(conv_id);
+
+    try server.initAt(client, from.*, key);
 
     log.debug("player from {f} has logged in into account with uid {d}", .{ from, auth_response.uid });
 }
@@ -156,7 +165,8 @@ pub fn receiveKcpPacket(
     const frame: Frame = .{
         .target_index = client,
         .time = time,
-        .cvars = &server.cvars,
+        .clients = &server.clients,
+        .properties = &server.properties,
         .multi_conversation = &server.multi_conversation,
     };
 
@@ -183,12 +193,22 @@ fn initAt(
     index: u32,
     addr: net.IpAddress,
     key: messaging.Xorpad.Key,
-) void {
-    server.cvars.packet_counters[index] = .init;
-    server.cvars.addrs[index] = addr;
-    server.cvars.xorpads[index].fillSeeded(key);
+) !void {
+    if (server.clients.capacity() <= index) {
+        _ = try server.clients.mapOne();
+        std.debug.assert(server.clients.capacity() > index);
+    }
 
-    server.cvars.properties.setDefaultsAt(@enumFromInt(index));
+    if (server.properties.capacity() <= index) {
+        _ = try server.properties.mapOne();
+        std.debug.assert(server.properties.capacity() > index);
+    }
+
+    server.clients.getPtr(.packet_counter, index).* = .init;
+    server.clients.getPtr(.addr, index).* = addr;
+    server.clients.getPtr(.xorpad, index).fillSeeded(key);
+
+    logic.Properties.setDefaultsAt(&server.properties, @enumFromInt(index));
 }
 
 fn release(server: *Server, id: kcp.ConvId) bool {
@@ -200,23 +220,6 @@ fn release(server: *Server, id: kcp.ConvId) bool {
         return true;
     } else return false;
 }
-
-// TODO: a better name for this;
-// a more or less sane structure will arise
-// on its own when we'll start to track more state.
-pub const ClientVariables = struct {
-    packet_counters: []PacketCounter,
-    xorpads: []messaging.Xorpad,
-    addrs: []net.IpAddress,
-    properties: logic.Properties,
-
-    fn initAlloc(uninit: *ClientVariables, arena: Allocator, slots: usize) Allocator.Error!void {
-        uninit.packet_counters = try arena.alloc(PacketCounter, slots);
-        uninit.xorpads = try arena.alloc(messaging.Xorpad, slots);
-        uninit.addrs = try arena.alloc(net.IpAddress, slots);
-        try uninit.properties.initAlloc(arena, slots);
-    }
-};
 
 pub const PacketCounter = enum(u32) {
     init = 1,
@@ -242,6 +245,7 @@ const messaging = @import("messaging.zig");
 
 const rmio = @import("rmio");
 const rmpb = @import("rmpb");
+const rmmem = @import("rmmem");
 
 const std = @import("std");
 const Server = @This();

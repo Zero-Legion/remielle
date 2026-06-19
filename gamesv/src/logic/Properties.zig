@@ -1,24 +1,30 @@
 pub const Avatar = @import("Properties/Avatar.zig");
 
-basic_info: []BasicInfo,
-avatar: []Avatar,
+basic_info: BasicInfo,
+avatar: Avatar,
+
+pub const List = rmmem.RemielleArrayList(
+    rmmem.suggestBucketSize(64, Properties),
+    Properties,
+    u32,
+);
 
 pub fn initAlloc(uninit: *Properties, arena: Allocator, slots: usize) Allocator.Error!void {
     uninit.basic_info = try arena.alloc(BasicInfo, slots);
     uninit.avatar = try arena.alloc(Avatar, slots);
 }
 
-pub fn setDefaultsAt(props: *Properties, at: Player) void {
+pub fn setDefaultsAt(list: *List, at: Player) void {
     const index = at.toInt();
 
-    props.basic_info[index] = .init;
-    props.avatar[index] = .init;
+    list.getPtr(.basic_info, index).* = .init;
+    list.getPtr(.avatar, index).* = .init;
 
-    props.unlockAllAvatars(at);
+    unlockAllAvatars(list, at);
 }
 
-fn unlockAllAvatars(props: *Properties, at: Player) void {
-    const avatar = &props.avatar[at.toInt()];
+fn unlockAllAvatars(props: *Properties.List, at: Player) void {
+    const avatar = props.getPtr(.avatar, at.toInt());
 
     for (templates.avatar_base.entries) |template| if (template.camp != 0) {
         const i = avatar.indexes.count();
@@ -75,7 +81,7 @@ fn Subset(
 
     for (types, field_types[1..], field_names[1..]) |P, *field_type, *field_name| {
         search: for (properties_fields) |properties_field| {
-            if (properties_field.type == []P) {
+            if (properties_field.type == P) {
                 field_type.* = switch (access) {
                     .immutable => *const P,
                     .mutable => *P,
@@ -90,13 +96,16 @@ fn Subset(
     return @Struct(.auto, null, &field_names, &field_types, &@splat(.{}));
 }
 
-pub fn extractFor(properties: *Properties, comptime Sub: type, index: u32) Sub {
+pub fn extractFor(properties: *Properties.List, comptime Sub: type, index: u32) Sub {
     var subset: Sub = undefined;
+
+    const bucket = properties.buckets.items[index / Properties.List.bucket_capacity];
+    const i = index % Properties.List.bucket_capacity;
 
     inline for (@typeInfo(Sub).@"struct".fields) |field| {
         if (field.type == void) continue;
 
-        @field(subset, field.name) = &@field(properties, field.name)[index];
+        @field(subset, field.name) = &@field(bucket, field.name)[i];
     }
 
     return subset;
@@ -196,6 +205,8 @@ const Allocator = std.mem.Allocator;
 const templates = Assets.templates;
 
 const Assets = @import("../Assets.zig");
+
+const rmmem = @import("rmmem");
 const std = @import("std");
 
 const Properties = @This();

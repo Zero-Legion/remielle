@@ -11,7 +11,7 @@ fn SoaBucket(comptime capacity: usize, comptime Struct: type) type {
             bool => std.StaticBitSet(capacity),
             else => |Field| switch (@typeInfo(Field)) {
                 .bool => unreachable,
-                .int, .float, .array, .@"struct", .@"enum", .pointer => [capacity]Field,
+                .int, .float, .array, .@"struct", .@"enum", .@"union", .pointer => [capacity]Field,
                 else => @compileError("you're holding it wrong"),
             },
         };

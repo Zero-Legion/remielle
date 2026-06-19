@@ -7,6 +7,8 @@ pub fn bind(
     udp_address: *const net.IpAddress,
     concurrent_sessions: u32,
 ) Io.Cancelable!void {
+    _ = concurrent_sessions; // TODO: cap it by other means
+
     const udp_socket = udp_address.bind(
         io,
         .{ .mode = .dgram, .protocol = .udp },
@@ -28,10 +30,7 @@ pub fn bind(
     var per_message_arena: heap.ArenaAllocator = .init(gpa);
     defer per_message_arena.deinit();
 
-    var server: Server = undefined;
-    server.initAlloc(server_arena.allocator(), &per_message_arena, csprng, concurrent_sessions) catch
-        fatal("failed to allocate server instance for {d} sessions slots", .{concurrent_sessions});
-
+    var server: Server = .init(&per_message_arena, csprng);
     var buffer: [kcp.mtu]u8 = undefined;
 
     recv_loop: while (true) {
@@ -132,6 +131,7 @@ pub fn bind(
                     error.OutOfMemory,
                     error.SessionLimitExceeded,
                     error.InvalidFirstPacket,
+                    error.MappingFailed,
                     => continue,
                 };
             },
@@ -181,7 +181,7 @@ fn notifyPlayerKick(
 
     try messaging.send(
         &server.multi_conversation,
-        &server.cvars,
+        &server.clients,
         index,
         .notify,
         notify,
@@ -193,7 +193,7 @@ fn notifyPlayerKick(
         current_time,
         &server.multi_conversation,
         index,
-        &server.cvars.addrs[index],
+        server.clients.getPtr(.addr, index),
     );
 
     var ctl: [kcp.Control.size]u8 = undefined;
@@ -207,7 +207,7 @@ fn notifyPlayerKick(
         404,
     );
 
-    try udp_socket.send(io, &server.cvars.addrs[index], &ctl);
+    try udp_socket.send(io, server.clients.getPtr(.addr, index), &ctl);
 }
 
 fn drainOutgoingPackets(
