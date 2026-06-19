@@ -161,6 +161,44 @@ const AckRing = struct {
     }
 };
 
+const Rx = struct {
+    rttval: u32,
+    srtt: kcp.Timeval,
+    rto: kcp.Timeval,
+
+    pub const init: Rx = .{
+        .rttval = 0,
+        .srtt = .zero,
+        .rto = .zero,
+    };
+
+    pub fn refresh(rx: *Rx, rtt_ms: u32) void {
+        if (rx.srtt.milliseconds == 0) {
+            rx.srtt.milliseconds = rtt_ms;
+            rx.rttval = @divTrunc(rtt_ms, 2);
+        } else {
+            const delta_i: i32 = @bitCast(rtt_ms -% rx.srtt.milliseconds);
+            const delta: u32 = @intCast(if (delta_i < 0) -delta_i else delta_i);
+
+            rx.rttval = @divTrunc((3 * rx.rttval + delta), 4);
+            rx.srtt.milliseconds = @divTrunc((7 * rx.srtt.milliseconds + rtt_ms), 8);
+            rx.srtt.milliseconds = @max(rx.srtt.milliseconds, 1);
+        }
+
+        const interval: u32 = 100;
+        const rto = rx.srtt.milliseconds + @max(
+            interval,
+            4 * rx.rttval,
+        );
+
+        rx.rto.milliseconds = std.math.clamp(
+            rto,
+            min_rto.milliseconds,
+            max_rto.milliseconds,
+        );
+    }
+};
+
 const Storage = struct {
     ids: []kcp.ConvId,
     tokens: []kcp.Token,
@@ -170,9 +208,7 @@ const Storage = struct {
     start_time: []kcp.Timeval,
     last_update: []kcp.Timeval,
 
-    rx_rttval: []u32,
-    rx_srtt: []kcp.Timeval,
-    rx_rto: []kcp.Timeval,
+    rx: []Rx,
 
     const Rings = struct {
         node: SinglyLinkedList.Node,
@@ -283,9 +319,7 @@ pub fn create(
     mc.storage.start_time[index] = .fromTimestamp(start_time);
     mc.storage.last_update[index] = .zero;
 
-    mc.storage.rx_rttval[index] = 0;
-    mc.storage.rx_srtt[index] = .zero;
-    mc.storage.rx_rto[index] = .zero;
+    mc.storage.rx[index] = .init;
 
     return @enumFromInt(index);
 }
@@ -491,38 +525,6 @@ pub fn writer(mc: *MultiConversation, client: u32, size: usize) AllocWriterError
     return .init(ring, first);
 }
 
-fn refreshRtt(mc: *MultiConversation, client: u32, rtt_ms: u32) void {
-    var rto: u32 = 0;
-
-    const rx_srtt = &mc.storage.rx_srtt[client];
-    const rx_rttval = &mc.storage.rx_rttval[client];
-    const rx_rto = &mc.storage.rx_rto[client];
-
-    if (rx_srtt.milliseconds == 0) {
-        rx_srtt.milliseconds = rtt_ms;
-        rx_rttval.* = @divTrunc(rtt_ms, 2);
-    } else {
-        const delta_i: i32 = @bitCast(rtt_ms -% rx_srtt.milliseconds);
-        const delta: u32 = @intCast(if (delta_i < 0) -delta_i else delta_i);
-
-        rx_rttval.* = @divTrunc((3 * rx_rttval.* + delta), 4);
-        rx_srtt.milliseconds = @divTrunc((7 * rx_srtt.milliseconds + rtt_ms), 8);
-        rx_srtt.milliseconds = @max(rx_srtt.milliseconds, 1);
-    }
-
-    const interval: u32 = 100;
-    rto = rx_srtt.milliseconds + @max(
-        interval,
-        4 * rx_rttval.*,
-    );
-
-    rx_rto.milliseconds = std.math.clamp(
-        rto,
-        min_rto.milliseconds,
-        max_rto.milliseconds,
-    );
-}
-
 pub fn fillAt(mc: *MultiConversation, client_index: u32, data: []const u8) !void {
     const current = mc.storage.last_update[client_index];
     const rings = mc.storage.rings[client_index];
@@ -542,7 +544,7 @@ pub fn fillAt(mc: *MultiConversation, client_index: u32, data: []const u8) !void
         switch (header.cmd) {
             .ack => {
                 if (current.milliseconds >= header.ts.milliseconds)
-                    mc.refreshRtt(client_index, current.milliseconds - header.ts.milliseconds);
+                    mc.storage.rx[client_index].refresh(current.milliseconds - header.ts.milliseconds);
 
                 rings.send.ack(header.sn);
 
@@ -632,7 +634,7 @@ pub fn drainAt(mc: *MultiConversation, client: u32, it: *DrainIterator, output: 
 
     rings.ack.reset();
 
-    const rx_rto = mc.storage.rx_rto[client];
+    const rx_rto = mc.storage.rx[client].rto;
 
     const it_index = switch (it.*) {
         .init => init: {
