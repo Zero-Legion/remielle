@@ -2,7 +2,7 @@ const log = std.log.scoped(.@"remielle-gamesv");
 
 pub const Options = struct {
     bind_address: []const u8 = @import("config").bind_address,
-    concurrent_sessions: u32 = @import("config").concurrent_sessions,
+    concurrent_sessions_limit: u32 = @import("config").concurrent_sessions_limit,
     insecure_random_allowed: bool = false,
 };
 
@@ -56,7 +56,12 @@ pub fn main(init: Init.Minimal) void {
     var csprng_impl: DefaultCsprng = .init(csprng_seed);
     const csprng = csprng_impl.random();
 
-    const bind_args = .{ io, gpa, csprng, &bind_address, options.concurrent_sessions };
+    const concurrent_sessions_limit: Io.Limit = switch (options.concurrent_sessions_limit) {
+        0 => .unlimited,
+        else => |limit| .limited64(limit),
+    };
+
+    const bind_args = .{ io, gpa, csprng, &bind_address, concurrent_sessions_limit };
 
     var app_future = io.concurrent(app.bind, bind_args) catch |concurrent_err| switch (concurrent_err) {
         error.ConcurrencyUnavailable => {

@@ -9,6 +9,7 @@ conv_map: array_hash_map.Auto(kcp.ConvId, u32),
 /// Used for kcp tokens
 conv_random: u64,
 per_message_arena: *heap.ArenaAllocator,
+session_limit: Io.Limit,
 
 pub const Client = struct {
     packet_counter: PacketCounter,
@@ -34,6 +35,7 @@ pub fn init(
     /// Used for per-message allocations
     per_message_arena: *heap.ArenaAllocator,
     csprng: Random,
+    session_limit: Io.Limit,
 ) Server {
     return .{
         .multi_conversation = .init,
@@ -43,6 +45,7 @@ pub fn init(
         .properties = .empty,
         .conv_random = csprng.int(u64),
         .per_message_arena = per_message_arena,
+        .session_limit = session_limit,
     };
 }
 
@@ -97,11 +100,15 @@ pub fn onAuthSucceeded(
     key: messaging.Xorpad.Key,
     auth_response: rmpb.main.PlayerGetTokenScRsp,
 ) !void {
-    const client = switch (try server.multi_conversation.create(arena, conv_id, token, current_time)) {
-        .none => return error.SessionLimitExceeded, // TODO: evict a client
-        _ => |index| index.toInt(),
+    server.session_limit = switch (server.session_limit) {
+        .unlimited => .unlimited,
+        .nothing => return error.SessionLimitExceeded,
+        _ => |limit| limit.subtract(1).?,
     };
 
+    errdefer server.increaseLimit();
+
+    const client = try server.multi_conversation.create(arena, conv_id, token, current_time);
     errdefer server.multi_conversation.destroy(client);
 
     // ACK the packet at kcp level
@@ -211,9 +218,17 @@ fn initAt(
     logic.Properties.setDefaultsAt(&server.properties, @enumFromInt(index));
 }
 
+fn increaseLimit(server: *Server) void {
+    server.session_limit = switch (server.session_limit) {
+        .unlimited => .unlimited,
+        .nothing, _ => |limit| @enumFromInt(limit.toInt().? + 1),
+    };
+}
+
 fn release(server: *Server, id: kcp.ConvId) bool {
     if (server.conv_map.fetchSwapRemove(id)) |kv| {
         // Release the resources associated with this `conv_id`.
+        server.increaseLimit();
         const client = kv.value;
 
         server.multi_conversation.destroy(client);

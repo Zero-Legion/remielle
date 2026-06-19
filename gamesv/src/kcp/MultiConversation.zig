@@ -296,7 +296,7 @@ pub fn create(
     conv_id: kcp.ConvId,
     token: kcp.Token,
     start_time: Io.Timestamp,
-) Allocator.Error!OptionalIndex {
+) Allocator.Error!u32 {
     const global_index = take_index: switch (mc.free.head) {
         .none => {
             const bucket_index: u32 = @intCast(mc.storage.mapOne() catch
@@ -338,7 +338,7 @@ pub fn create(
     bucket.last_update[index] = .zero;
     bucket.rx[index] = .init;
 
-    return @enumFromInt(global_index);
+    return global_index;
 }
 
 pub const Reader = struct {

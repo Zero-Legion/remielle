@@ -5,10 +5,8 @@ pub fn bind(
     gpa: Allocator,
     csprng: Random,
     udp_address: *const net.IpAddress,
-    concurrent_sessions: u32,
+    concurrent_session_limit: Io.Limit,
 ) Io.Cancelable!void {
-    _ = concurrent_sessions; // TODO: cap it by other means
-
     const udp_socket = udp_address.bind(
         io,
         .{ .mode = .dgram, .protocol = .udp },
@@ -30,7 +28,7 @@ pub fn bind(
     var per_message_arena: heap.ArenaAllocator = .init(gpa);
     defer per_message_arena.deinit();
 
-    var server: Server = .init(&per_message_arena, csprng);
+    var server: Server = .init(&per_message_arena, csprng, concurrent_session_limit);
     var buffer: [kcp.mtu]u8 = undefined;
 
     recv_loop: while (true) {

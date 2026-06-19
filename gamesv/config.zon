@@ -3,9 +3,10 @@
     // Can be overridden by the `-b` option.
     .bind_address = "127.0.0.1:20501",
 
-    // The amount of allowed concurrent sessions.
+    // The amount of sessions allowed to be processed concurrently.
+    // Zero means unlimited amount.
     // Can be overridden by the `-c` option.
-    .concurrent_sessions = 64,
+    .concurrent_sessions_limit = 0,
 
     .dummy_cmd = "GNIBBDCLMAA",
 }
