@@ -137,7 +137,7 @@ pub fn bind(
             },
         }
 
-        while (server.output.pop()) |index| drainOutgoingPackets(
+        while (server.multi_conversation.nextUndrained()) |index| drainOutgoingPackets(
             io,
             udp_socket,
             current_time,

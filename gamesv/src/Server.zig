@@ -2,7 +2,6 @@ const log = std.log.scoped(.@"remielle-gamesv");
 
 multi_conversation: kcp.MultiConversation,
 cvars: ClientVariables,
-output: OutputList,
 conv_counter: kcp.ConvId.Counter,
 /// ConvId -> session index
 conv_map: array_hash_map.Auto(kcp.ConvId, u32),
@@ -31,7 +30,6 @@ pub fn initAlloc(
     max_concurrent_sessions: usize,
 ) Allocator.Error!void {
     try uninit.cvars.initAlloc(arena, max_concurrent_sessions);
-    try uninit.output.initAlloc(arena, max_concurrent_sessions);
 
     uninit.multi_conversation = .init;
     uninit.conv_counter = .init;
@@ -177,7 +175,6 @@ pub fn receiveKcpPacket(
         };
     }
 
-    server.output.add(client);
     return .success;
 }
 
@@ -187,8 +184,6 @@ fn initAt(
     addr: net.IpAddress,
     key: messaging.Xorpad.Key,
 ) void {
-    server.output.addUnchecked(index);
-
     server.cvars.packet_counters[index] = .init;
     server.cvars.addrs[index] = addr;
     server.cvars.xorpads[index].fillSeeded(key);
@@ -231,62 +226,6 @@ pub const PacketCounter = enum(u32) {
         defer counter.* = @enumFromInt(1 +% @intFromEnum(counter.*));
         return @intFromEnum(counter.*);
     }
-};
-
-/// The list of sessions that have pending outgoing packets.
-const OutputList = struct {
-    head: OptionalIndex,
-    nodes: []Node,
-
-    pub fn pop(list: *OutputList) ?u32 {
-        return switch (list.head) {
-            .none => null,
-            _ => |index| take: {
-                const i = index.toInt();
-                list.head = list.nodes[i].next;
-                list.nodes[i].already = false;
-
-                break :take i;
-            },
-        };
-    }
-
-    fn add(list: *OutputList, index: u32) void {
-        if (list.nodes[index].already) return;
-        list.addUnchecked(index);
-    }
-
-    fn addUnchecked(list: *OutputList, index: u32) void {
-        list.nodes[index] = .{
-            .next = list.head,
-            .already = true,
-        };
-
-        list.head = @enumFromInt(index);
-    }
-
-    fn initAlloc(uninit: *OutputList, arena: Allocator, slots: usize) Allocator.Error!void {
-        uninit.head = .none;
-        uninit.nodes = try arena.alloc(Node, slots);
-    }
-
-    const Node = struct {
-        const init: Node = .{ .next = .none, .already = false };
-
-        next: OptionalIndex,
-        /// Indicates if the session is already in the list.
-        already: bool,
-    };
-
-    const OptionalIndex = enum(u32) {
-        none = std.math.maxInt(u32),
-        _,
-
-        fn toInt(oi: OptionalIndex) u32 {
-            std.debug.assert(oi != .none);
-            return @intFromEnum(oi);
-        }
-    };
 };
 
 const Io = std.Io;
