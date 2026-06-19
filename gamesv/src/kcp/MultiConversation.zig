@@ -199,9 +199,13 @@ const Rx = struct {
     }
 };
 
+pub const Identifier = struct {
+    id: kcp.ConvId,
+    token: kcp.Token,
+};
+
 const Storage = struct {
-    ids: []kcp.ConvId,
-    tokens: []kcp.Token,
+    identifiers: []Identifier,
     nodes: []List.Node,
     rings: []*Rings,
 
@@ -311,14 +315,11 @@ pub fn create(
     rings.send.reset();
     rings.recv.reset();
     rings.ack.reset();
+
+    mc.storage.identifiers[index] = .{ .id = conv_id, .token = token };
     mc.storage.rings[index] = rings;
-
-    mc.storage.ids[index] = conv_id;
-    mc.storage.tokens[index] = token;
-
     mc.storage.start_time[index] = .fromTimestamp(start_time);
     mc.storage.last_update[index] = .zero;
-
     mc.storage.rx[index] = .init;
 
     return @enumFromInt(index);
@@ -410,12 +411,8 @@ pub const Reader = struct {
     }
 };
 
-pub fn getConvIdAt(mc: *MultiConversation, index: u32) kcp.ConvId {
-    return mc.storage.ids[index];
-}
-
-pub fn getTokenAt(mc: *MultiConversation, index: u32) kcp.Token {
-    return mc.storage.tokens[index];
+pub inline fn identifierAt(mc: *MultiConversation, index: u32) Identifier {
+    return mc.storage.identifiers[index];
 }
 
 pub fn reader(mc: *MultiConversation, index: u32) ?Reader {
@@ -599,8 +596,7 @@ pub const DrainIterator = union(enum) {
 // Returns the amount of bytes drained.
 // This function should be called repeatedly, while `DrainIterator` is not at end.
 pub fn drainAt(mc: *MultiConversation, client: u32, it: *DrainIterator, output: *[kcp.mtu]u8) usize {
-    const conv_id = mc.storage.ids[client];
-    const token = mc.storage.tokens[client].downgrade();
+    const identifier = mc.storage.identifiers[client];
 
     const current = mc.storage.last_update[client];
     const rings = mc.storage.rings[client];
@@ -610,8 +606,8 @@ pub fn drainAt(mc: *MultiConversation, client: u32, it: *DrainIterator, output: 
 
     var bw: Io.Writer = .fixed(output);
     var ack_header: kcp.Header = .{
-        .conv_id = conv_id,
-        .token = token,
+        .conv_id = identifier.id,
+        .token = identifier.token.downgrade(),
         .cmd = .ack,
         .frg = .last,
         .wnd = wnd,
@@ -677,8 +673,8 @@ pub fn drainAt(mc: *MultiConversation, client: u32, it: *DrainIterator, output: 
             rings.send.xmit[index] += 1;
 
             const header: kcp.Header = .{
-                .conv_id = conv_id,
-                .token = token,
+                .conv_id = identifier.id,
+                .token = identifier.token.downgrade(),
                 .cmd = .push,
                 .frg = rings.send.frg[index],
                 .wnd = wnd,

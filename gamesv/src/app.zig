@@ -197,11 +197,13 @@ fn notifyPlayerKick(
     );
 
     var ctl: [kcp.Control.size]u8 = undefined;
+    const identifier = server.multi_conversation.identifierAt(index);
+
     kcp.Control.encode(
         &ctl,
         .disconnect,
-        server.multi_conversation.getConvIdAt(index),
-        server.multi_conversation.getTokenAt(index).downgrade(),
+        identifier.id,
+        identifier.token.downgrade(),
         404,
     );
 
