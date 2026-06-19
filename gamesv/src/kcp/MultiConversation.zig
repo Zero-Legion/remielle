@@ -462,8 +462,10 @@ pub inline fn identifierAt(mc: *MultiConversation, index: u32) Identifier {
 }
 
 pub fn reader(mc: *MultiConversation, index: u32) ?Reader {
-    _ = mc.peekSize(index) orelse return null;
-    return .init(&mc.storage.get(.rings, index).recv);
+    return if (mc.isReadable(index))
+        .init(&mc.storage.get(.rings, index).recv)
+    else
+        null;
 }
 
 /// Discards one kcp packet.
@@ -480,24 +482,26 @@ pub fn discardAt(mc: *MultiConversation, client: u32) void {
     }
 }
 
-fn peekSize(mc: *MultiConversation, client: u32) ?usize {
+fn isReadable(mc: *MultiConversation, client: u32) bool {
     const ring = &mc.storage.get(.rings, client).recv;
 
     const ring_head = ring.head;
     defer ring.head = ring_head;
 
-    const first = ring.pop() orelse return null;
+    const first = ring.pop() orelse
+        return false;
 
     return switch (ring.frg[first]) {
-        .last => ring.len[first],
-        _ => {
-            var len = ring.len[first];
+        .last => true,
+        _ => walk_segments: {
             while (ring.pop()) |index| {
                 switch (ring.frg[index]) {
-                    .last => return len + ring.len[index],
-                    _ => len += ring.len[index],
+                    .last => break :walk_segments true,
+                    _ => {},
                 }
-            } else return null;
+            }
+
+            break :walk_segments false;
         },
     };
 }
