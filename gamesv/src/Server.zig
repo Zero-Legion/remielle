@@ -36,7 +36,6 @@ pub fn initAlloc(
     uninit.multi_conversation = .init;
     uninit.conv_counter = .init;
     uninit.conv_map = .empty;
-    try uninit.conv_map.ensureTotalCapacity(arena, max_concurrent_sessions);
 
     uninit.conv_random = csprng.int(u64);
     uninit.per_message_arena = per_message_arena;
@@ -115,7 +114,7 @@ pub fn onAuthSucceeded(
     const cmd_id = comptime rmpb.cmdId(rmpb.main.PlayerGetTokenScRsp).?;
     messaging.encode(&writer.interface, .initial, cmd_id, .init, auth_response) catch unreachable;
 
-    server.conv_map.putAssumeCapacity(conv_id, client);
+    try server.conv_map.put(arena, conv_id, client);
     server.initAt(client, from.*, key);
 
     log.debug("player from {f} has logged in into account with uid {d}", .{ from, auth_response.uid });
