@@ -1,4 +1,5 @@
 pub const PlayerToken = struct {
+    is_first_login: bool,
     response: PlayerGetTokenScRsp,
     key: Xorpad.Key,
     uid: u32,
@@ -6,17 +7,27 @@ pub const PlayerToken = struct {
 
 pub const PlayerGetTokenError = error{
     RandKeyDecryptFail,
-};
+} || Persistent.AccountUid.Error || Allocator.Error;
 
 pub const string_buffer_size = block_size_base64 * 2;
 
 pub fn playerGetToken(
+    gpa: Allocator,
     csprng: Random,
+    persistent: *Persistent,
     request: *const PlayerGetTokenCsReq,
     string_buffer: *[string_buffer_size]u8,
 ) PlayerGetTokenError!PlayerToken {
     const client_rand_key = decryptClientRandKey(request.client_rand_key) orelse
         return error.RandKeyDecryptFail;
+
+    var is_first_login = false;
+    const account_uid: Persistent.AccountUid = try .fromString(request.account_uid);
+
+    const uid = persistent.getPlayerUidByAccountUid(account_uid) orelse create: {
+        is_first_login = true;
+        break :create try persistent.createPlayerUidForAccountUid(gpa, account_uid);
+    };
 
     const server_rand_key = csprng.int(u64);
     const encrypted_rand_key = string_buffer[0..block_size_base64];
@@ -24,7 +35,6 @@ pub fn playerGetToken(
 
     encryptAndSignServerRandKey(server_rand_key, encrypted_rand_key, sign);
 
-    const uid: u32 = 666; // TODO
     const response: rmpb.main.PlayerGetTokenScRsp = .{
         .uid = uid,
         .server_rand_key = encrypted_rand_key,
@@ -32,6 +42,7 @@ pub fn playerGetToken(
     };
 
     return .{
+        .is_first_login = is_first_login,
         .response = response,
         .key = .init(client_rand_key, server_rand_key),
         .uid = uid,
@@ -75,12 +86,14 @@ fn encryptAndSignServerRandKey(
 const block_size_base64 = base64.Encoder.calcSize(rmcrypt.rsa.block_size);
 
 const Random = std.Random;
+const Allocator = std.mem.Allocator;
 const PlayerGetTokenCsReq = rmpb.main.PlayerGetTokenCsReq;
 const PlayerGetTokenScRsp = rmpb.main.PlayerGetTokenScRsp;
 
 const base64 = std.base64.standard;
 
 const Xorpad = @import("Xorpad.zig");
+const Persistent = @import("../Persistent.zig");
 
 const rmcrypt = @import("rmcrypt");
 const rmpb = @import("rmpb");

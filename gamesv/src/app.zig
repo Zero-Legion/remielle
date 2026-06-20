@@ -7,6 +7,13 @@ pub fn bind(
     udp_address: *const net.IpAddress,
     concurrent_session_limit: Io.Limit,
 ) Io.Cancelable!void {
+    var persistent = Persistent.init(io, gpa, .cwd()) catch |err| switch (err) {
+        error.Canceled => |e| return e,
+        else => |e| fatal("failed to initialize Persistent: {t}", .{e}),
+    };
+
+    defer persistent.deinit(gpa);
+
     const udp_socket = udp_address.bind(
         io,
         .{ .mode = .dgram, .protocol = .udp },
@@ -105,15 +112,27 @@ pub fn bind(
                 var response_string_buffer: [messaging.auth.string_buffer_size]u8 = undefined;
 
                 const player_token = messaging.auth.playerGetToken(
+                    gpa,
                     csprng,
+                    &persistent,
                     &request,
                     &response_string_buffer,
                 ) catch |err| switch (err) {
-                    error.RandKeyDecryptFail => |e| {
+                    error.OutOfMemory,
+                    error.InvalidUidString,
+                    error.RandKeyDecryptFail,
+                    => |e| {
                         log.err("failed to authenticate client from {f}: {t}", .{ udp_message.from, e });
                         continue;
                     },
                 };
+
+                if (player_token.is_first_login) {
+                    persistent.saveAccountUidMap(io) catch |err| switch (err) {
+                        error.Canceled => |e| return e,
+                        else => |e| fatal("failed to save account uid map: {t}", .{e}),
+                    };
+                }
 
                 server.onAuthSucceeded(
                     server_arena.allocator(),
@@ -244,6 +263,7 @@ const net = std.Io.net;
 const kcp = @import("kcp.zig");
 const Server = @import("Server.zig");
 const messaging = @import("messaging.zig");
+const Persistent = @import("Persistent.zig");
 
 const rmpb = @import("rmpb");
 const rmio = @import("rmio");

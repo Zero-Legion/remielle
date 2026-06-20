@@ -8,5 +8,9 @@
     // Can be overridden by the `-c` option.
     .concurrent_sessions_limit = 0,
 
+    // The first player UID.
+    // All created account UIDs will be relative to this.
+    .base_player_uid = 666, // the number of the beast
+
     .dummy_cmd = "GNIBBDCLMAA",
 }
