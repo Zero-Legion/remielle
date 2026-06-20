@@ -316,7 +316,14 @@ fn operate(userdata: ?*anyopaque, operation: Io.Operation) Io.Cancelable!Io.Oper
             return .{ .net_receive = .{ null, 1 } };
         },
 
-        .file_read_streaming, .file_write_streaming => unreachable, // Not implemented
+        .file_write_streaming => |*o| return .{
+            .file_write_streaming = rio.fileWriteStreaming(o) catch |err| switch (err) {
+                error.Canceled => |e| return e,
+                else => |e| e,
+            },
+        },
+
+        .file_read_streaming => unreachable, // Not implemented
         .device_io_control => unreachable, // Not implemented
     }
 }
@@ -989,6 +996,57 @@ fn dirCreateFile(
     };
 }
 
+fn fileWriteStreaming(
+    rio: *RemiellIo,
+    operation: *const Io.Operation.FileWriteStreaming,
+) !usize {
+    const iovecs_capacity = if (Operation.FileWriteStreaming.vectored) 8 else 0;
+    var iovecs: [iovecs_capacity]Impl.Vector(.@"const") = undefined;
+    var iovecs_count: usize = 0;
+
+    const point = rio.waitPoint();
+
+    if (Operation.FileWriteStreaming.vectored) {
+        addVector(.@"const", &iovecs, &iovecs_count, operation.header);
+
+        for (operation.data[0 .. operation.data.len - 1]) |buf|
+            addVector(.@"const", &iovecs, &iovecs_count, buf);
+
+        const pattern = operation.data[operation.data.len - 1];
+        for (0..operation.splat) |_|
+            addVector(.@"const", &iovecs, &iovecs_count, pattern);
+
+        if (iovecs_count == 0)
+            return 0;
+
+        point.submit(.{ .file_write_streaming = .{
+            .file_handle = operation.file.handle,
+            .data = iovecs[0..iovecs_count],
+        } }, rio);
+    } else {
+        const buffer: []const u8 = buffer: {
+            if (operation.header.len != 0) break :buffer operation.header;
+
+            for (operation.data[0 .. operation.data.len - 1]) |buf| if (buf.len != 0)
+                break :buffer buf;
+
+            const pattern = operation.data[operation.data.len - 1];
+            if (pattern.len == 0 or operation.splat == 0)
+                return 0;
+
+            break :buffer operation.data[operation.data.len - 1];
+        };
+
+        point.submit(.{ .file_write_streaming = .{
+            .file_handle = operation.file.handle,
+            .data = buffer,
+        } }, rio);
+    }
+
+    rio.block(.submission);
+    return rio.unblock(point.awaitee.operation.primary.storage.completion.result.file_write_streaming);
+}
+
 fn waitPoint(rio: *RemiellIo) *WaitPoint {
     const current = rio.current_coro orelse return &rio.naked_wait;
     return &current.wait_point;
@@ -1110,6 +1168,7 @@ pub const Operation = union(enum) {
     file_read_positional: FileReadPositional,
     create_dir: CreateDir,
     dir_create_file: DirCreateFile,
+    file_write_streaming: FileWriteStreaming,
 
     pub const NetAccept = struct {
         listener_handle: Io.net.Socket.Handle,
@@ -1215,6 +1274,20 @@ pub const Operation = union(enum) {
         pub const Error = Io.File.OpenError;
 
         pub const Result = Error!Io.File.Handle;
+    };
+
+    pub const FileWriteStreaming = struct {
+        pub const vectored = native_os != .windows;
+
+        file_handle: Io.File.Handle,
+        data: if (vectored)
+            []const Impl.Vector(.@"const")
+        else
+            []const u8,
+
+        pub const Error = Io.Operation.FileWriteStreaming.Error || Io.Cancelable;
+
+        pub const Result = Error!usize;
     };
 
     pub const Tag = @typeInfo(Operation).@"union".tag_type.?;

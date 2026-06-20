@@ -275,6 +275,18 @@ fn drainSubmitted(u: *Uring) void {
 
                 u.outstanding += 1;
             },
+            .file_write_streaming => |writev| {
+                _ = setUserdata(storage, .file_write_streaming);
+
+                _ = u.ring.writev(
+                    @intFromPtr(storage),
+                    writev.file_handle,
+                    @ptrCast(writev.data),
+                    std.math.maxInt(u64),
+                ) catch unreachable;
+
+                u.outstanding += 1;
+            },
         }
     }
 }
@@ -497,6 +509,24 @@ fn fillCompleted(u: *Uring) void {
 
                 u.outstanding -= 1;
             },
+            .file_write_streaming => |*writev| {
+                _ = writev;
+
+                u.completeOne(storage, .{ .file_write_streaming = switch (err) {
+                    .SUCCESS => @intCast(cqe.res),
+                    .INVAL => unreachable,
+                    .BADF => error.NotOpenForWriting,
+                    .DQUOT => error.DiskQuota,
+                    .FBIG => error.FileTooBig,
+                    .IO => error.InputOutput,
+                    .NOSPC => error.NoSpaceLeft,
+                    .PERM => error.PermissionDenied,
+                    .PIPE => error.BrokenPipe,
+                    else => |e| unexpected(e),
+                } });
+
+                u.outstanding -= 1;
+            },
         }
     }
 }
@@ -534,6 +564,7 @@ const RingUserdata = union(enum) {
     file_read_positional: void,
     create_dir: void,
     dir_create_file: void,
+    file_write_streaming: void,
 };
 
 fn setUserdata(storage: *Operation.Storage, userdata: RingUserdata) *RingUserdata {

@@ -486,7 +486,7 @@ fn drainSubmitted(iocp: *Iocp) void {
 
                 const attr: windows.OBJECT.ATTRIBUTES = .{
                     .RootDirectory = dir_handle,
-                    .ObjectName = @constCast(&sub_path_w.string()),
+                    .ObjectName = @constCast(&create.sub_path.space.string()),
                 };
 
                 const create_disposition: windows.FILE.CREATE_DISPOSITION = if (create.options.truncate)
@@ -537,6 +537,36 @@ fn drainSubmitted(iocp: *Iocp) void {
                         .NOT_A_DIRECTORY => error.NotDir,
                         .USER_MAPPED_FILE => error.AccessDenied,
                         .VIRUS_INFECTED, .VIRUS_DELETED => error.AntivirusInterference,
+                        .DISK_FULL => error.NoSpaceLeft,
+                        else => |status| unexpectedNtStatus(status),
+                    },
+                });
+            },
+            .file_write_streaming => |write| {
+                var iosb: windows.IO_STATUS_BLOCK = undefined;
+
+                // TODO: use overlapped I/O
+                iocp.completeOne(storage, .{
+                    .file_write_streaming = switch (windows.ntdll.NtWriteFile(
+                        write.file_handle,
+                        null, // Event,
+                        null, // ApcRoutine
+                        null, // ApcContext
+                        &iosb,
+                        write.data.ptr,
+                        @truncate(write.data.len),
+                        null,
+                        null, // Key
+                    )) {
+                        .SUCCESS => @intCast(iosb.Information),
+                        .INVALID_USER_BUFFER => error.SystemResources,
+                        .NO_MEMORY => error.SystemResources,
+                        .QUOTA_EXCEEDED => error.SystemResources,
+                        .PIPE_BROKEN => error.BrokenPipe,
+                        .INVALID_HANDLE => error.NotOpenForWriting,
+                        .FILE_LOCK_CONFLICT => error.LockViolation,
+                        .ACCESS_DENIED => error.AccessDenied,
+                        .WORKING_SET_QUOTA => error.SystemResources,
                         .DISK_FULL => error.NoSpaceLeft,
                         else => |status| unexpectedNtStatus(status),
                     },
