@@ -231,6 +231,18 @@ fn drainSubmitted(u: *Uring) void {
 
                 u.outstanding += 1;
             },
+            .file_read_positional => |preadv| {
+                _ = setUserdata(storage, .file_read_positional);
+
+                _ = u.ring.read(
+                    @intFromPtr(storage),
+                    preadv.file_handle,
+                    .{ .iovecs = @ptrCast(preadv.data) },
+                    preadv.offset,
+                ) catch unreachable;
+
+                u.outstanding += 1;
+            },
         }
     }
 }
@@ -388,6 +400,24 @@ fn fillCompleted(u: *Uring) void {
 
                 u.outstanding -= 1;
             },
+            .file_read_positional => |*preadv| {
+                _ = preadv;
+
+                u.completeOne(storage, .{ .file_read_positional = switch (err) {
+                    .SUCCESS => @intCast(cqe.res),
+                    .BADF, .INVAL => unreachable,
+                    .NXIO => error.Unseekable,
+                    .SPIPE => error.Unseekable,
+                    .OVERFLOW => error.Unseekable,
+                    .NOBUFS => error.SystemResources,
+                    .NOMEM => error.SystemResources,
+                    .IO => error.InputOutput,
+                    .ISDIR => error.IsDir,
+                    else => |e| unexpected(e),
+                } });
+
+                u.outstanding -= 1;
+            },
         }
     }
 }
@@ -422,6 +452,7 @@ const RingUserdata = union(enum) {
         pending_res: i32,
     },
     dir_open_file: void,
+    file_read_positional: void,
 };
 
 fn setUserdata(storage: *Operation.Storage, userdata: RingUserdata) *RingUserdata {

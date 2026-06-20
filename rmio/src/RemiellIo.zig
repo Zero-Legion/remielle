@@ -271,6 +271,7 @@ const vtable: Io.VTable = vtable: {
     v.random = random;
     v.randomSecure = randomSecure;
     v.dirOpenFile = dirOpenFile;
+    v.fileReadPositional = fileReadPositional;
 
     break :vtable v;
 };
@@ -866,6 +867,38 @@ fn dirOpenFile(
     };
 }
 
+fn fileReadPositional(
+    userdata: ?*anyopaque,
+    file: Io.File,
+    data: []const []u8,
+    offset: u64,
+) Io.File.ReadPositionalError!usize {
+    const rio: *RemiellIo = @ptrCast(@alignCast(userdata));
+    try rio.checkCancel();
+
+    const iovecs_capacity = if (Operation.FileReadPositional.vectored) 8 else 0;
+    var iovecs: [iovecs_capacity]Impl.Vector(.@"var") = undefined;
+    var iovecs_count: usize = 0;
+
+    if (Operation.FileReadPositional.vectored) {
+        for (data) |buf| if (buf.len != 0)
+            addVector(.@"var", &iovecs, &iovecs_count, buf);
+    }
+
+    const point = rio.waitPoint();
+    point.submit(.{ .file_read_positional = .{
+        .file_handle = file.handle,
+        .data = if (Operation.FileReadPositional.vectored)
+            iovecs[0..iovecs_count]
+        else
+            data[0],
+        .offset = offset,
+    } }, rio);
+
+    rio.block(.submission);
+    return rio.unblock(point.awaitee.operation.primary.storage.completion.result.file_read_positional);
+}
+
 fn waitPoint(rio: *RemiellIo) *WaitPoint {
     const current = rio.current_coro orelse return &rio.naked_wait;
     return &current.wait_point;
@@ -984,6 +1017,7 @@ pub const Operation = union(enum) {
     net_receive: NetReceive,
     net_send: NetSend,
     dir_open_file: DirOpenFile,
+    file_read_positional: FileReadPositional,
 
     pub const NetAccept = struct {
         listener_handle: Io.net.Socket.Handle,
@@ -1054,6 +1088,21 @@ pub const Operation = union(enum) {
         pub const Error = Io.File.OpenError;
 
         pub const Result = Error!Io.File.Handle;
+    };
+
+    pub const FileReadPositional = struct {
+        pub const vectored = native_os != .windows;
+
+        file_handle: Io.File.Handle,
+        data: if (vectored)
+            []const Impl.Vector(.@"var")
+        else
+            []u8,
+        offset: u64,
+
+        pub const Error = Io.File.ReadPositionalError;
+
+        pub const Result = Error!usize;
     };
 
     pub const Tag = @typeInfo(Operation).@"union".tag_type.?;

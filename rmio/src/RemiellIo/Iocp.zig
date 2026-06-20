@@ -397,6 +397,33 @@ fn drainSubmitted(iocp: *Iocp) void {
                     },
                 });
             },
+            .file_read_positional => |pread| {
+                var iosb: windows.IO_STATUS_BLOCK = undefined;
+                const byte_offset: windows.LARGE_INTEGER = @intCast(pread.offset);
+
+                // TODO: use overlapped I/O
+                iocp.completeOne(storage, .{
+                    .file_read_positional = switch (windows.ntdll.NtReadFile(
+                        pread.file_handle,
+                        null, // Event,
+                        null, // ApcRoutine
+                        null, // ApcContext
+                        &iosb,
+                        pread.data.ptr,
+                        @truncate(pread.data.len),
+                        &byte_offset,
+                        null, // Key
+                    )) {
+                        .SUCCESS => @intCast(iosb.Information),
+                        .END_OF_FILE, .PIPE_BROKEN => 0,
+                        .INVALID_HANDLE => error.NotOpenForReading,
+                        .INVALID_DEVICE_REQUEST => error.IsDir,
+                        .FILE_LOCK_CONFLICT => error.LockViolation,
+                        .ACCESS_DENIED => error.AccessDenied,
+                        else => |status| unexpectedNtStatus(status),
+                    },
+                });
+            },
         }
     }
 }
