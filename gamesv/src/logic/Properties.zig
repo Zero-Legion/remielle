@@ -200,12 +200,50 @@ pub const HallAvatar = enum(u32) {
     };
 };
 
+pub fn toPlayerSave(props: *Properties.List, arena: Allocator, player: Player) Allocator.Error!pb.PlayerSave {
+    _ = arena;
+
+    const index = @intFromEnum(player);
+    const basic_info = props.getPtr(.basic_info, index);
+
+    return .{
+        .basic = .{
+            .level = basic_info.level.toInt(),
+            .avatar_id = basic_info.avatar.toInt(),
+            .control_avatar_id = basic_info.control_avatar.toInt(),
+            .control_guise_avatar_id = basic_info.control_guise_avatar.toInt(),
+        },
+    };
+}
+
+pub fn fromPlayerSave(
+    props: *Properties.List,
+    gpa: Allocator,
+    player: Player,
+    save: *const pb.PlayerSave,
+) !void {
+    _ = gpa;
+
+    const index = @intFromEnum(player);
+    props.getPtr(.basic_info, index).* = if (save.basic) |basic| .{
+        .level = @enumFromInt(basic.level),
+        .avatar = @enumFromInt(basic.avatar_id),
+        .control_avatar = @enumFromInt(basic.control_avatar_id),
+        .control_guise_avatar = @enumFromInt(basic.control_guise_avatar_id),
+    } else .init;
+
+    // TODO
+    props.getPtr(.avatar, index).* = .init;
+    unlockAllAvatars(props, player);
+}
+
 const Allocator = std.mem.Allocator;
 
 const templates = Assets.templates;
 
 const Assets = @import("../Assets.zig");
 
+const pb = @import("rmpb").stable;
 const rmmem = @import("rmmem");
 const std = @import("std");
 

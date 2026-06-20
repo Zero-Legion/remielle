@@ -65,12 +65,53 @@ pub fn saveAccountUidMap(persistent: *const Persistent, io: Io) !void {
     });
 }
 
+pub fn loadPlayer(
+    persistent: *const Persistent,
+    io: Io,
+    arena: Allocator,
+    player_uid: u32,
+) !PlayerSave {
+    var path_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+    const path = std.fmt.bufPrint(&path_buf, "Persistent/LocalStorage/USD_{d}.bin", .{player_uid}) catch
+        unreachable;
+
+    const file = try persistent.root.openFile(io, path, .{});
+    defer file.close(io);
+
+    var reader_buf: [1024]u8 = undefined;
+    var fr = file.reader(io, &reader_buf);
+
+    return try rmpb.decode(.stable, PlayerSave, arena, &fr.interface);
+}
+
+pub fn savePlayer(
+    persistent: *const Persistent,
+    io: Io,
+    player_uid: u32,
+    save: PlayerSave,
+) !void {
+    var path_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+    const path = std.fmt.bufPrint(&path_buf, "Persistent/LocalStorage/USD_{d}.bin", .{player_uid}) catch
+        unreachable;
+
+    const file = try persistent.root.createFile(io, path, .{});
+    defer file.close(io);
+
+    var writer_buf: [1024]u8 = undefined;
+    var fw = file.writer(io, &writer_buf);
+
+    try rmpb.encode(.stable, &fw.interface, save);
+    try fw.interface.flush();
+}
+
 fn ensureDirectories(io: Io, root: Io.Dir) !void {
     try root.createDirPath(io, "Persistent/LocalStorage/");
 }
 
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
+const PlayerSave = rmpb.stable.PlayerSave;
 
+const rmpb = @import("rmpb");
 const std = @import("std");
 const Persistent = @This();

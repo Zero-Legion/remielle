@@ -56,11 +56,38 @@ pub fn bind(
 
         if (udp_message.data.len == kcp.Control.size) {
             var out_buf: ?[kcp.Control.size]u8 = null;
-            server.receiveControlPacket(
+            const status = server.receiveControlPacket(
                 &udp_message.from,
                 .{ .buffer = buffer[0..kcp.Control.size] },
                 &out_buf,
             );
+
+            switch (status) {
+                .nothing => {},
+                .disconnect => |conv_id| disconnect: {
+                    const index: u32 = @intCast(server.conv_map.getIndex(conv_id) orelse
+                        break :disconnect);
+
+                    defer _ = server.release(conv_id);
+
+                    log.debug("player from {f} disconnected", .{udp_message.from});
+
+                    // Save player on disconnect
+                    const player_uid = server.clients.get(.uid, index);
+
+                    savePlayer(
+                        io,
+                        per_message_arena.allocator(),
+                        &persistent,
+                        &server.properties,
+                        player_uid,
+                        index,
+                    ) catch |err| log.err(
+                        "failed to save player with uid {d}: {t}",
+                        .{ player_uid, err },
+                    );
+                },
+            }
 
             if (out_buf) |*send_buf|
                 udp_socket.send(io, &udp_message.from, send_buf) catch |err| switch (err) {
@@ -127,14 +154,7 @@ pub fn bind(
                     },
                 };
 
-                if (player_token.is_first_login) {
-                    persistent.saveAccountUidMap(io) catch |err| switch (err) {
-                        error.Canceled => |e| return e,
-                        else => |e| fatal("failed to save account uid map: {t}", .{e}),
-                    };
-                }
-
-                server.onAuthSucceeded(
+                const player_index = server.onAuthSucceeded(
                     server_arena.allocator(),
                     &udp_message.from,
                     udp_message.data,
@@ -151,6 +171,58 @@ pub fn bind(
                     error.MappingFailed,
                     => continue,
                 };
+
+                if (player_token.is_first_login) {
+                    const old_cancel_protection = io.swapCancelProtection(.blocked);
+                    defer _ = io.swapCancelProtection(old_cancel_protection);
+
+                    persistent.saveAccountUidMap(io) catch |err| switch (err) {
+                        error.Canceled => unreachable, // blocked
+                        else => |e| fatal("failed to save account uid map: {t}", .{e}),
+                    };
+
+                    logic.Properties.setDefaultsAt(&server.properties, @enumFromInt(player_index));
+
+                    savePlayer(
+                        io,
+                        per_message_arena.allocator(),
+                        &persistent,
+                        &server.properties,
+                        player_token.uid,
+                        player_index,
+                    ) catch |err| log.err(
+                        "failed to save player with uid {d}: {t}",
+                        .{ player_token.uid, err },
+                    );
+                } else {
+                    const player_save = persistent.loadPlayer(
+                        io,
+                        per_message_arena.allocator(),
+                        player_token.uid,
+                    ) catch |err| switch (err) {
+                        error.Canceled => |e| return e,
+                        else => |e| {
+                            log.err("failed to load player with uid {d}: {t}", .{ player_token.uid, e });
+
+                            // Reset defaults for now.
+                            logic.Properties.setDefaultsAt(&server.properties, @enumFromInt(player_index));
+                            continue;
+                        },
+                    };
+
+                    logic.Properties.fromPlayerSave(
+                        &server.properties,
+                        gpa,
+                        @enumFromInt(player_index),
+                        &player_save,
+                    ) catch |err| {
+                        log.err("failed to load player with uid {d}: {t}", .{ player_token.uid, err });
+
+                        // Reset defaults for now.
+                        logic.Properties.setDefaultsAt(&server.properties, @enumFromInt(player_index));
+                        continue;
+                    };
+                }
             },
         }
 
@@ -183,6 +255,25 @@ pub fn bind(
                 .PlayerKickReason_ServerClose,
             ) catch {};
     }
+}
+
+fn savePlayer(
+    io: Io,
+    arena: Allocator,
+    persistent: *Persistent,
+    properties: *logic.Properties.List,
+    uid: u32,
+    index: u32,
+) !void {
+    const player_save = try logic.Properties.toPlayerSave(properties, arena, @enumFromInt(index));
+
+    const old_cancel_protection = io.swapCancelProtection(.blocked);
+    defer _ = io.swapCancelProtection(old_cancel_protection);
+
+    persistent.savePlayer(io, uid, player_save) catch |err| switch (err) {
+        error.Canceled => unreachable, // blocked
+        else => |e| return e,
+    };
 }
 
 /// Sends `PlayerKickScNotify` followed by disconnection control packet.
@@ -261,6 +352,7 @@ const heap = std.heap;
 const net = std.Io.net;
 
 const kcp = @import("kcp.zig");
+const logic = @import("logic.zig");
 const Server = @import("Server.zig");
 const messaging = @import("messaging.zig");
 const Persistent = @import("Persistent.zig");

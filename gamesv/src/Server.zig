@@ -15,6 +15,7 @@ pub const Client = struct {
     packet_counter: PacketCounter,
     xorpad: messaging.Xorpad,
     addr: net.IpAddress,
+    uid: u32,
 };
 
 pub const Clients = rmmem.RemielleArrayList(rmmem.suggestBucketSize(64, Client), Client, u32);
@@ -49,12 +50,17 @@ pub fn init(
     };
 }
 
+pub const ControlPacketStatus = union(enum) {
+    nothing: void,
+    disconnect: kcp.ConvId,
+};
+
 pub fn receiveControlPacket(
     server: *Server,
     from: *const net.IpAddress,
     ctl: kcp.Control,
     out: *?[kcp.Control.size]u8,
-) void {
+) ControlPacketStatus {
     switch (ctl.kind()) {
         .connect => {
             const conv_id = server.conv_counter.next();
@@ -66,6 +72,8 @@ pub fn receiveControlPacket(
 
             out.* = @as([kcp.Control.size]u8, undefined);
             kcp.Control.encode(&out.*.?, .send_back_conv, conv_id, token.downgrade(), 0);
+
+            return .nothing;
         },
         .disconnect => {
             const conv_id = ctl.conv();
@@ -75,15 +83,14 @@ pub fn receiveControlPacket(
                 .addr = @bitCast(from.ip4.bytes),
             });
 
-            if (!ctl.isToken(token)) return;
+            if (!ctl.isToken(token)) return .nothing;
 
             out.* = @as([kcp.Control.size]u8, undefined);
             kcp.Control.encode(&out.*.?, .disconnect, conv_id, token.downgrade(), 0);
 
-            if (server.release(conv_id))
-                log.debug("player from {f} disconnected", .{from});
+            return .{ .disconnect = conv_id };
         },
-        .send_back_conv, _ => {}, // Clients should not send this
+        .send_back_conv, _ => return .nothing, // Clients should not send this
     }
 }
 
@@ -99,7 +106,7 @@ pub fn onAuthSucceeded(
     current_time: Io.Timestamp,
     key: messaging.Xorpad.Key,
     auth_response: rmpb.main.PlayerGetTokenScRsp,
-) !void {
+) !u32 {
     server.session_limit = switch (server.session_limit) {
         .unlimited => .unlimited,
         .nothing => return error.SessionLimitExceeded,
@@ -129,9 +136,10 @@ pub fn onAuthSucceeded(
     try server.conv_map.put(arena, conv_id, {});
     errdefer _ = server.conv_map.swapRemove(conv_id);
 
-    try server.addClient(from.*, key);
-
+    const index = try server.addClient(from.*, key, auth_response.uid);
     log.debug("player from {f} has logged in into account with uid {d}", .{ from, auth_response.uid });
+
+    return index;
 }
 
 pub const ReceiveStatus = union(enum) {
@@ -199,7 +207,8 @@ fn addClient(
     server: *Server,
     addr: net.IpAddress,
     key: messaging.Xorpad.Key,
-) !void {
+    uid: u32,
+) !u32 {
     const index = try server.clients.addOne();
     const properties_index = try server.properties.addOne();
 
@@ -207,9 +216,10 @@ fn addClient(
 
     server.clients.getPtr(.packet_counter, index).* = .init;
     server.clients.getPtr(.addr, index).* = addr;
+    server.clients.getPtr(.uid, index).* = uid;
     server.clients.getPtr(.xorpad, index).fillSeeded(key);
 
-    logic.Properties.setDefaultsAt(&server.properties, @enumFromInt(index));
+    return index;
 }
 
 fn increaseLimit(server: *Server) void {
@@ -219,7 +229,7 @@ fn increaseLimit(server: *Server) void {
     };
 }
 
-fn release(server: *Server, id: kcp.ConvId) bool {
+pub fn release(server: *Server, id: kcp.ConvId) bool {
     const client: u32 = @intCast(server.conv_map.getIndex(id) orelse
         return false);
 

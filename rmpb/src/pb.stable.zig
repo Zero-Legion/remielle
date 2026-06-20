@@ -35,3 +35,23 @@ pub const PacketHead = struct {
     pub const ack_packet_id_field_desc: FieldDesc = .{ .number = 11, .xor = 0 };
 };
 
+pub const PlayerSave = struct {
+    pub const init: @This() = .{};
+    pub const pb_desc_name = "PlayerSave";
+    basic: ?BasicSave = null,
+    pub const basic_field_desc: FieldDesc = .{ .number = 1, .xor = 0 };
+};
+
+pub const BasicSave = struct {
+    pub const init: @This() = .{};
+    pub const pb_desc_name = "BasicSave";
+    level: u32 = 0,
+    avatar_id: u32 = 0,
+    control_avatar_id: u32 = 0,
+    control_guise_avatar_id: u32 = 0,
+    pub const level_field_desc: FieldDesc = .{ .number = 1, .xor = 0 };
+    pub const avatar_id_field_desc: FieldDesc = .{ .number = 2, .xor = 0 };
+    pub const control_avatar_id_field_desc: FieldDesc = .{ .number = 3, .xor = 0 };
+    pub const control_guise_avatar_id_field_desc: FieldDesc = .{ .number = 4, .xor = 0 };
+};
+
