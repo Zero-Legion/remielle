@@ -76,7 +76,7 @@ pub fn RemielleArrayList(
 
         pub fn addOne(list: *List) MapError!Index {
             if (list.item_count == list.capacity())
-                try list.mapOne();
+                try list.mapBucket();
 
             defer list.item_count += 1;
             return if (enum_indexing) @enumFromInt(list.item_count) else @intCast(list.item_count);
@@ -137,8 +137,7 @@ pub fn RemielleArrayList(
         };
 
         /// Maps one bucket.
-        /// Returns index into `buckets`.
-        pub fn mapOne(list: *List) MapError!void {
+        pub fn mapBucket(list: *List) MapError!void {
             const page = heap.PageAllocator.map(@sizeOf(Bucket), .of(Bucket)) orelse
                 return error.MappingFailed;
 
