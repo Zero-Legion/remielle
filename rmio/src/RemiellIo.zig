@@ -272,6 +272,7 @@ const vtable: Io.VTable = vtable: {
     v.randomSecure = randomSecure;
     v.dirOpenFile = dirOpenFile;
     v.fileReadPositional = fileReadPositional;
+    v.fileClose = fileClose;
 
     break :vtable v;
 };
@@ -897,6 +898,15 @@ fn fileReadPositional(
 
     rio.block(.submission);
     return rio.unblock(point.awaitee.operation.primary.storage.completion.result.file_read_positional);
+}
+
+fn fileClose(userdata: ?*anyopaque, files: []const Io.File) void {
+    _ = userdata;
+
+    for (files) |file| switch (native_os) {
+        .windows => _ = Impl.NtClose(file.handle),
+        else => _ = std.posix.system.close(file.handle),
+    };
 }
 
 fn waitPoint(rio: *RemiellIo) *WaitPoint {

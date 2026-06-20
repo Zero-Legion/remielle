@@ -823,6 +823,7 @@ pub fn Vector(mut: Mutability) type {
 // Re-exported for the higher level code to use.
 pub const closesocket = ws2_32.closesocket;
 pub const SOCKET = ws2_32.SOCKET;
+pub const NtClose = windows.ntdll.NtClose;
 
 const windows = std.os.windows;
 
