@@ -3,6 +3,14 @@ submissions: std.DoublyLinkedList,
 completions: std.DoublyLinkedList,
 outstanding: usize,
 
+pub const PathBuffer = struct {
+    space: Io.Threaded.WindowsPathSpace,
+
+    pub fn initPinned(buffer: *PathBuffer, dir: Io.Dir.Handle, path: []const u8) !void {
+        buffer.space = try Io.Threaded.sliceToPrefixedFileW(dir, path, .{});
+    }
+};
+
 pub fn init() RemiellIo.InitError!Iocp {
     var data: ws2_32.WSADATA = undefined;
     switch (ws2_32.WSAStartup(0x0202, &data)) {
@@ -330,6 +338,64 @@ fn drainSubmitted(iocp: *Iocp) void {
                     },
                     else => |e| unexpectedWsa(e),
                 } });
+            },
+            .dir_open_file => |*open| {
+                const sub_path_w = open.sub_path.space.span();
+                const dir_handle = if (Io.Dir.path.isAbsoluteWindowsWtf16(sub_path_w))
+                    null
+                else
+                    open.dir_handle;
+
+                const allow_directory = open.options.allow_directory and !open.options.isWrite();
+
+                var iosb: windows.IO_STATUS_BLOCK = undefined;
+                var result: windows.HANDLE = undefined;
+
+                iocp.completeOne(storage, .{
+                    .dir_open_file = switch (windows.ntdll.NtCreateFile(
+                        &result,
+                        .{
+                            .STANDARD = .{ .SYNCHRONIZE = true },
+                            .GENERIC = .{
+                                .READ = open.options.isRead(),
+                                .WRITE = open.options.isWrite(),
+                            },
+                        },
+                        &.{
+                            .RootDirectory = dir_handle,
+                            .ObjectName = @constCast(&windows.UNICODE_STRING.init(sub_path_w)),
+                        },
+                        &iosb,
+                        null,
+                        .{ .NORMAL = true },
+                        .VALID_FLAGS,
+                        .OPEN,
+                        .{
+                            .IO = if (open.options.follow_symlinks) .SYNCHRONOUS_NONALERT else .ASYNCHRONOUS,
+                            .NON_DIRECTORY_FILE = !allow_directory,
+                            .OPEN_REPARSE_POINT = !open.options.follow_symlinks,
+                        },
+                        null,
+                        0,
+                    )) {
+                        .SUCCESS => result,
+                        .OBJECT_NAME_INVALID => error.BadPathName,
+                        .OBJECT_NAME_NOT_FOUND => error.FileNotFound,
+                        .OBJECT_PATH_NOT_FOUND => error.FileNotFound,
+                        .BAD_NETWORK_PATH => error.NetworkNotFound, // \\server was not found
+                        .BAD_NETWORK_NAME => error.NetworkNotFound, // \\server was found but \\server\share wasn't
+                        .NO_MEDIA_IN_DEVICE => error.NoDevice,
+                        .ACCESS_DENIED => error.AccessDenied,
+                        .PIPE_BUSY => error.PipeBusy,
+                        .PIPE_NOT_AVAILABLE => error.NoDevice,
+                        .OBJECT_NAME_COLLISION => error.PathAlreadyExists,
+                        .FILE_IS_A_DIRECTORY => error.IsDir,
+                        .NOT_A_DIRECTORY => error.NotDir,
+                        .USER_MAPPED_FILE => error.AccessDenied,
+                        .VIRUS_INFECTED, .VIRUS_DELETED => error.AntivirusInterference,
+                        else => |status| unexpectedNtStatus(status),
+                    },
+                });
             },
         }
     }

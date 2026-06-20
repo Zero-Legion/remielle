@@ -3,6 +3,27 @@ submissions: std.DoublyLinkedList,
 completions: std.DoublyLinkedList,
 outstanding: usize,
 
+pub const PathBuffer = struct {
+    len: usize,
+    bytes: [Io.Dir.max_path_bytes]u8,
+
+    pub fn initPinned(buffer: *PathBuffer, dir: Io.Dir.Handle, path: []const u8) !void {
+        _ = dir; // windows-only retardation
+
+        if (path.len >= Io.Dir.max_path_bytes)
+            return error.BadPathName;
+
+        @memcpy(buffer.bytes[0..path.len], path);
+        buffer.bytes[path.len] = 0;
+        buffer.len = path.len;
+    }
+
+    inline fn view(buffer: *PathBuffer) [*:0]u8 {
+        std.debug.assert(buffer.bytes[buffer.len] == 0);
+        return @ptrCast(&buffer.bytes);
+    }
+};
+
 pub fn init() RemiellIo.InitError!Uring {
     const ring = linux.IoUring.init(256, 0) catch |err| switch (err) {
         error.SystemOutdated,
@@ -187,6 +208,29 @@ fn drainSubmitted(u: *Uring) void {
 
                 u.outstanding += 1;
             },
+            .dir_open_file => |open| {
+                std.debug.assert(open.options.lock == .none); // Not implemented
+                _ = setUserdata(storage, .dir_open_file);
+
+                const flags: linux.O = .{
+                    .ACCMODE = switch (open.options.mode) {
+                        .read_only => .RDONLY,
+                        .write_only => .WRONLY,
+                        .read_write => .RDWR,
+                    },
+                    .NOFOLLOW = !open.options.follow_symlinks,
+                };
+
+                _ = u.ring.openat(
+                    @intFromPtr(storage),
+                    open.dir_handle,
+                    open.sub_path.view(),
+                    flags,
+                    0, // mode
+                ) catch unreachable;
+
+                u.outstanding += 1;
+            },
         }
     }
 }
@@ -321,6 +365,29 @@ fn fillCompleted(u: *Uring) void {
 
                 u.outstanding -= 1;
             },
+            .dir_open_file => |*open| {
+                _ = open;
+
+                u.completeOne(storage, .{ .dir_open_file = switch (err) {
+                    .SUCCESS => @intCast(cqe.res),
+                    .BADF, .INVAL => unreachable,
+                    .ACCES => error.AccessDenied,
+                    .ISDIR => error.IsDir,
+                    .NOTDIR => error.NotDir,
+                    .BUSY => error.DeviceBusy,
+                    .NOENT => error.FileNotFound,
+                    .EXIST => error.PathAlreadyExists,
+                    .MFILE => error.ProcessFdQuotaExceeded,
+                    .NFILE => error.SystemFdQuotaExceeded,
+                    .NOMEM => error.SystemResources,
+                    .PERM => error.PermissionDenied,
+                    .ROFS => error.ReadOnlyFileSystem,
+                    .NOSPC => error.NoSpaceLeft,
+                    else => |e| unexpected(e),
+                } });
+
+                u.outstanding -= 1;
+            },
         }
     }
 }
@@ -354,6 +421,7 @@ const RingUserdata = union(enum) {
         vector: std.posix.iovec_const,
         pending_res: i32,
     },
+    dir_open_file: void,
 };
 
 fn setUserdata(storage: *Operation.Storage, userdata: RingUserdata) *RingUserdata {

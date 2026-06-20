@@ -270,6 +270,7 @@ const vtable: Io.VTable = vtable: {
     v.now = now;
     v.random = random;
     v.randomSecure = randomSecure;
+    v.dirOpenFile = dirOpenFile;
 
     break :vtable v;
 };
@@ -836,6 +837,35 @@ fn now(userdata: ?*anyopaque, clock: Io.Clock) Io.Timestamp {
     };
 }
 
+fn dirOpenFile(
+    userdata: ?*anyopaque,
+    dir: Io.Dir,
+    sub_path: []const u8,
+    options: Io.Dir.OpenFileOptions,
+) Io.File.OpenError!Io.File {
+    const rio: *RemiellIo = @ptrCast(@alignCast(userdata));
+    try rio.checkCancel();
+
+    var path_buffer: Impl.PathBuffer = undefined;
+    try path_buffer.initPinned(dir.handle, sub_path);
+
+    const point = rio.waitPoint();
+    point.submit(.{ .dir_open_file = .{
+        .dir_handle = dir.handle,
+        .sub_path = &path_buffer,
+        .options = options,
+    } }, rio);
+
+    rio.block(.submission);
+
+    const handle = try rio.unblock(point.awaitee.operation.primary.storage.completion.result.dir_open_file);
+
+    return .{
+        .handle = handle,
+        .flags = .{ .nonblocking = false },
+    };
+}
+
 fn waitPoint(rio: *RemiellIo) *WaitPoint {
     const current = rio.current_coro orelse return &rio.naked_wait;
     return &current.wait_point;
@@ -953,6 +983,7 @@ pub const Operation = union(enum) {
     cancel: Cancel,
     net_receive: NetReceive,
     net_send: NetSend,
+    dir_open_file: DirOpenFile,
 
     pub const NetAccept = struct {
         listener_handle: Io.net.Socket.Handle,
@@ -1013,6 +1044,16 @@ pub const Operation = union(enum) {
         pub const Error = Io.net.Socket.SendError;
 
         pub const Result = Error!usize;
+    };
+
+    pub const DirOpenFile = struct {
+        dir_handle: Io.Dir.Handle,
+        sub_path: *Impl.PathBuffer,
+        options: Io.Dir.OpenFileOptions,
+
+        pub const Error = Io.File.OpenError;
+
+        pub const Result = Error!Io.File.Handle;
     };
 
     pub const Tag = @typeInfo(Operation).@"union".tag_type.?;
