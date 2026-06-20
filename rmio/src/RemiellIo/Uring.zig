@@ -275,14 +275,17 @@ fn drainSubmitted(u: *Uring) void {
 
                 u.outstanding += 1;
             },
-            .file_write_streaming => |writev| {
-                _ = setUserdata(storage, .file_write_streaming);
+            .file_write => |write| {
+                _ = setUserdata(storage, .file_write);
 
                 _ = u.ring.writev(
                     @intFromPtr(storage),
-                    writev.file_handle,
-                    @ptrCast(writev.data),
-                    std.math.maxInt(u64),
+                    write.file_handle,
+                    @ptrCast(write.data),
+                    switch (write.mode) {
+                        .streaming => std.math.maxInt(u64),
+                        .positional => |offset| offset,
+                    },
                 ) catch unreachable;
 
                 u.outstanding += 1;
@@ -509,10 +512,10 @@ fn fillCompleted(u: *Uring) void {
 
                 u.outstanding -= 1;
             },
-            .file_write_streaming => |*writev| {
-                _ = writev;
+            .file_write => |*write| {
+                _ = write;
 
-                u.completeOne(storage, .{ .file_write_streaming = switch (err) {
+                u.completeOne(storage, .{ .file_write = switch (err) {
                     .SUCCESS => @intCast(cqe.res),
                     .INVAL => unreachable,
                     .BADF => error.NotOpenForWriting,
@@ -522,6 +525,7 @@ fn fillCompleted(u: *Uring) void {
                     .NOSPC => error.NoSpaceLeft,
                     .PERM => error.PermissionDenied,
                     .PIPE => error.BrokenPipe,
+                    .NXIO => error.Unseekable,
                     else => |e| unexpected(e),
                 } });
 
@@ -564,7 +568,7 @@ const RingUserdata = union(enum) {
     file_read_positional: void,
     create_dir: void,
     dir_create_file: void,
-    file_write_streaming: void,
+    file_write: void,
 };
 
 fn setUserdata(storage: *Operation.Storage, userdata: RingUserdata) *RingUserdata {

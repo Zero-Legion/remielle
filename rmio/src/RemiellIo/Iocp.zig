@@ -542,12 +542,16 @@ fn drainSubmitted(iocp: *Iocp) void {
                     },
                 });
             },
-            .file_write_streaming => |write| {
+            .file_write => |write| {
                 var iosb: windows.IO_STATUS_BLOCK = undefined;
+                const byte_offset: ?*const windows.LARGE_INTEGER = switch (write.mode) {
+                    .streaming => null,
+                    .positional => |*offset| @ptrCast(offset),
+                };
 
                 // TODO: use overlapped I/O
                 iocp.completeOne(storage, .{
-                    .file_write_streaming = switch (windows.ntdll.NtWriteFile(
+                    .file_write = switch (windows.ntdll.NtWriteFile(
                         write.file_handle,
                         null, // Event,
                         null, // ApcRoutine
@@ -555,7 +559,7 @@ fn drainSubmitted(iocp: *Iocp) void {
                         &iosb,
                         write.data.ptr,
                         @truncate(write.data.len),
-                        null,
+                        byte_offset,
                         null, // Key
                     )) {
                         .SUCCESS => @intCast(iosb.Information),
