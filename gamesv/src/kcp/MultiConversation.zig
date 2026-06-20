@@ -238,14 +238,6 @@ const OptionalIndex = enum(u32) {
     }
 };
 
-fn initBucket(uninit: *Storage.Bucket, base_index: u32) void {
-    for (uninit.node[0 .. Storage.bucket_capacity - 1], (base_index + 1)..) |*node, next|
-        node.next = @enumFromInt(@as(u32, @intCast(next)));
-
-    uninit.node[Storage.bucket_capacity - 1].next = .none;
-    uninit.undrained = .empty;
-}
-
 const List = struct {
     head: OptionalIndex,
 
@@ -273,21 +265,18 @@ const Storage = rmmem.RemielleArrayList(
 );
 
 storage: Storage,
-free: List,
 undrained: List,
 rings_pool: Rings.Pool,
 
 pub const init: MultiConversation = .{
     .storage = .empty,
-    .free = .{ .head = .none },
     .undrained = .{ .head = .none },
     .rings_pool = .init,
 };
 
-pub fn destroy(mc: *MultiConversation, conv_idx: u32) void {
+pub fn swapRemove(mc: *MultiConversation, conv_idx: u32) void {
     mc.rings_pool.recycle(mc.storage.get(.rings, conv_idx));
-    mc.storage.getPtr(.node, conv_idx).next = mc.free.head;
-    mc.free.head = @enumFromInt(conv_idx);
+    mc.storage.swapRemove(conv_idx);
 }
 
 pub fn create(
@@ -297,33 +286,13 @@ pub fn create(
     token: kcp.Token,
     start_time: Io.Timestamp,
 ) Allocator.Error!u32 {
-    const global_index = take_index: switch (mc.free.head) {
-        .none => {
-            const bucket_index: u32 = @intCast(mc.storage.mapOne() catch
-                return error.OutOfMemory);
-
-            const bucket = mc.storage.buckets.items[bucket_index];
-            const bucket_base = bucket_index * Storage.bucket_capacity;
-
-            initBucket(bucket, @intCast(bucket_base));
-            continue :take_index @enumFromInt(bucket_base);
-        },
-        _ => |free| free: {
-            const index = free.toInt();
-            const node = mc.storage.getPtr(.node, index);
-            mc.free.head = node.next;
-            node.next = .none;
-            break :free index;
-        },
-    };
+    const global_index = mc.storage.addOne() catch
+        return error.OutOfMemory;
 
     const bucket = mc.storage.buckets.items[global_index / Storage.bucket_capacity];
     const index = global_index % Storage.bucket_capacity;
 
-    errdefer {
-        mc.storage.getPtr(.node, global_index).next = mc.free.head;
-        mc.free.head = @enumFromInt(index);
-    }
+    errdefer mc.storage.item_count -= 1;
 
     const rings = try mc.rings_pool.create(arena);
     errdefer comptime unreachable;

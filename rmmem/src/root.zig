@@ -66,11 +66,20 @@ pub fn RemielleArrayList(
         // Keep in mind that we're storing pointers here, so even the worst case appending to it
         // won't result in copying/relocating all bucket data.
         buckets: std.ArrayList(*Bucket),
+        item_count: usize,
 
-        pub const empty: List = .{ .buckets = .empty };
+        pub const empty: List = .{ .buckets = .empty, .item_count = 0 };
 
         pub inline fn capacity(list: *const List) usize {
             return list.buckets.items.len * bucket_size;
+        }
+
+        pub fn addOne(list: *List) MapError!Index {
+            if (list.item_count == list.capacity())
+                try list.mapOne();
+
+            defer list.item_count += 1;
+            return if (enum_indexing) @enumFromInt(list.item_count) else @intCast(list.item_count);
         }
 
         pub inline fn get(
@@ -129,7 +138,7 @@ pub fn RemielleArrayList(
 
         /// Maps one bucket.
         /// Returns index into `buckets`.
-        pub fn mapOne(list: *List) MapError!usize {
+        pub fn mapOne(list: *List) MapError!void {
             const page = heap.PageAllocator.map(@sizeOf(Bucket), .of(Bucket)) orelse
                 return error.MappingFailed;
 
@@ -143,8 +152,26 @@ pub fn RemielleArrayList(
 
             list.buckets.append(heap.page_allocator, bucket) catch
                 return error.MappingFailed;
+        }
 
-            return list.buckets.items.len - 1;
+        pub fn swapRemove(list: *List, index: Index) void {
+            @setRuntimeSafety(false); // implicit boundary checks are for amateurs
+
+            const remove_at_bucket = list.buckets.items[@divFloor(intFromIndex(index), bucket_size)];
+            const last_bucket = list.buckets.items[@divFloor(list.item_count - 1, bucket_size)];
+
+            const remove_at = intFromIndex(index) % bucket_size;
+            const last = (list.item_count - 1) % bucket_size;
+
+            inline for (@typeInfo(Struct).@"struct".fields) |field| switch (field.type) {
+                bool => @field(remove_at_bucket, field.name).setValue(
+                    remove_at,
+                    @field(last_bucket, field.name).isSet(last),
+                ),
+                else => @field(remove_at_bucket, field.name)[remove_at] = @field(last_bucket, field.name)[last],
+            };
+
+            list.item_count -= 1;
         }
 
         inline fn intFromIndex(index: Index) usize {

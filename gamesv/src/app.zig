@@ -152,17 +152,17 @@ pub fn bind(
 
     if (rmpb.features.isAvailable(.player_kick)) {
         const current_time: Io.Timestamp = .now(io, .real);
+        var i: u32 = 0;
 
-        for (server.conv_map.values()) |client_index| {
+        while (i < server.conv_map.count()) : (i += 1)
             notifyPlayerKick(
                 io,
                 udp_socket,
                 &server,
                 current_time,
-                client_index,
+                i,
                 .PlayerKickReason_ServerClose,
             ) catch {};
-        }
     }
 }
 

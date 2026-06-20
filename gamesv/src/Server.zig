@@ -5,7 +5,7 @@ clients: Clients,
 properties: logic.Properties.List,
 conv_counter: kcp.ConvId.Counter,
 /// ConvId -> session index
-conv_map: array_hash_map.Auto(kcp.ConvId, u32),
+conv_map: array_hash_map.Auto(kcp.ConvId, void),
 /// Used for kcp tokens
 conv_random: u64,
 per_message_arena: *heap.ArenaAllocator,
@@ -109,7 +109,7 @@ pub fn onAuthSucceeded(
     errdefer server.increaseLimit();
 
     const client = try server.multi_conversation.create(arena, conv_id, token, current_time);
-    errdefer server.multi_conversation.destroy(client);
+    errdefer server.multi_conversation.swapRemove(client);
 
     // ACK the packet at kcp level
     server.multi_conversation.fillAt(client, first_packet) catch
@@ -126,10 +126,10 @@ pub fn onAuthSucceeded(
     const cmd_id = comptime rmpb.cmdId(rmpb.main.PlayerGetTokenScRsp).?;
     messaging.encode(&writer.interface, .initial, cmd_id, .init, auth_response) catch unreachable;
 
-    try server.conv_map.put(arena, conv_id, client);
+    try server.conv_map.put(arena, conv_id, {});
     errdefer _ = server.conv_map.swapRemove(conv_id);
 
-    try server.initAt(client, from.*, key);
+    try server.addClient(from.*, key);
 
     log.debug("player from {f} has logged in into account with uid {d}", .{ from, auth_response.uid });
 }
@@ -163,8 +163,8 @@ pub fn receiveKcpPacket(
         kcp_header.conv_id,
     ) orelse return error.InvalidToken;
 
-    const client = server.conv_map.get(kcp_header.conv_id) orelse
-        return .{ .unauthenticated = .{ .header = kcp_header, .token = token } };
+    const client: u32 = @intCast(server.conv_map.getIndex(kcp_header.conv_id) orelse
+        return .{ .unauthenticated = .{ .header = kcp_header, .token = token } });
 
     server.multi_conversation.fillAt(client, buffer) catch
         return error.FillFailed;
@@ -195,21 +195,15 @@ pub fn receiveKcpPacket(
     return .success;
 }
 
-fn initAt(
+fn addClient(
     server: *Server,
-    index: u32,
     addr: net.IpAddress,
     key: messaging.Xorpad.Key,
 ) !void {
-    if (server.clients.capacity() <= index) {
-        _ = try server.clients.mapOne();
-        std.debug.assert(server.clients.capacity() > index);
-    }
+    const index = try server.clients.addOne();
+    const properties_index = try server.properties.addOne();
 
-    if (server.properties.capacity() <= index) {
-        _ = try server.properties.mapOne();
-        std.debug.assert(server.properties.capacity() > index);
-    }
+    std.debug.assert(index == properties_index);
 
     server.clients.getPtr(.packet_counter, index).* = .init;
     server.clients.getPtr(.addr, index).* = addr;
@@ -226,14 +220,20 @@ fn increaseLimit(server: *Server) void {
 }
 
 fn release(server: *Server, id: kcp.ConvId) bool {
-    if (server.conv_map.fetchSwapRemove(id)) |kv| {
-        // Release the resources associated with this `conv_id`.
-        server.increaseLimit();
-        const client = kv.value;
+    const client: u32 = @intCast(server.conv_map.getIndex(id) orelse
+        return false);
 
-        server.multi_conversation.destroy(client);
-        return true;
-    } else return false;
+    // Release the resources associated with this `conv_id`.
+
+    server.increaseLimit();
+
+    _ = server.conv_map.swapRemove(id);
+
+    server.multi_conversation.swapRemove(client);
+    server.clients.swapRemove(client);
+    server.properties.swapRemove(client);
+
+    return true;
 }
 
 pub const PacketCounter = enum(u32) {
