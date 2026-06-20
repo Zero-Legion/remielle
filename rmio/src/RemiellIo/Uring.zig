@@ -231,14 +231,17 @@ fn drainSubmitted(u: *Uring) void {
 
                 u.outstanding += 1;
             },
-            .file_read_positional => |preadv| {
-                _ = setUserdata(storage, .file_read_positional);
+            .file_read => |read| {
+                _ = setUserdata(storage, .file_read);
 
                 _ = u.ring.read(
                     @intFromPtr(storage),
-                    preadv.file_handle,
-                    .{ .iovecs = @ptrCast(preadv.data) },
-                    preadv.offset,
+                    read.file_handle,
+                    .{ .iovecs = @ptrCast(read.data) },
+                    switch (read.mode) {
+                        .streaming => std.math.maxInt(u64),
+                        .positional => |offset| offset,
+                    },
                 ) catch unreachable;
 
                 u.outstanding += 1;
@@ -447,10 +450,10 @@ fn fillCompleted(u: *Uring) void {
 
                 u.outstanding -= 1;
             },
-            .file_read_positional => |*preadv| {
-                _ = preadv;
+            .file_read => |*read| {
+                _ = read;
 
-                u.completeOne(storage, .{ .file_read_positional = switch (err) {
+                u.completeOne(storage, .{ .file_read = switch (err) {
                     .SUCCESS => @intCast(cqe.res),
                     .BADF, .INVAL => unreachable,
                     .NXIO => error.Unseekable,
@@ -565,7 +568,7 @@ const RingUserdata = union(enum) {
         pending_res: i32,
     },
     dir_open_file: void,
-    file_read_positional: void,
+    file_read: void,
     create_dir: void,
     dir_create_file: void,
     file_write: void,

@@ -397,21 +397,24 @@ fn drainSubmitted(iocp: *Iocp) void {
                     },
                 });
             },
-            .file_read_positional => |pread| {
+            .file_read => |read| {
                 var iosb: windows.IO_STATUS_BLOCK = undefined;
-                const byte_offset: windows.LARGE_INTEGER = @intCast(pread.offset);
+                const byte_offset: ?*const windows.LARGE_INTEGER = switch (read.mode) {
+                    .streaming => null,
+                    .positional => |*offset| @ptrCast(offset),
+                };
 
                 // TODO: use overlapped I/O
                 iocp.completeOne(storage, .{
-                    .file_read_positional = switch (windows.ntdll.NtReadFile(
-                        pread.file_handle,
+                    .file_read = switch (windows.ntdll.NtReadFile(
+                        read.file_handle,
                         null, // Event,
                         null, // ApcRoutine
                         null, // ApcContext
                         &iosb,
-                        pread.data.ptr,
-                        @truncate(pread.data.len),
-                        &byte_offset,
+                        read.data.ptr,
+                        @truncate(read.data.len),
+                        byte_offset,
                         null, // Key
                     )) {
                         .SUCCESS => @intCast(iosb.Information),

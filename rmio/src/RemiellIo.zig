@@ -337,7 +337,24 @@ fn operate(userdata: ?*anyopaque, operation: Io.Operation) Io.Cancelable!Io.Oper
             };
         },
 
-        .file_read_streaming => unreachable, // Not implemented
+        .file_read_streaming => |*o| {
+            const iovecs_capacity = if (Operation.FileRead.vectored) 8 else 0;
+            var iovecs_buffer: [iovecs_capacity]Impl.Vector(.@"var") = undefined;
+
+            rio.submitFileRead(&iovecs_buffer, o.file.handle, .streaming, o.data);
+            rio.block(.submission);
+
+            return .{
+                .file_read_streaming = rio.unblock(
+                    rio.waitPoint().awaitee.operation.primary.storage.completion.result.file_read,
+                ) catch |err| switch (err) {
+                    error.Unseekable => unreachable, // streaming
+                    error.Canceled => |e| return e,
+                    else => |e| e,
+                },
+            };
+        },
+
         .device_io_control => unreachable, // Not implemented
     }
 }
@@ -901,27 +918,21 @@ fn fileReadPositional(
     const rio: *RemiellIo = @ptrCast(@alignCast(userdata));
     try rio.checkCancel();
 
-    const iovecs_capacity = if (Operation.FileReadPositional.vectored) 8 else 0;
-    var iovecs: [iovecs_capacity]Impl.Vector(.@"var") = undefined;
-    var iovecs_count: usize = 0;
+    const iovecs_capacity = if (Operation.FileRead.vectored) 8 else 0;
+    var iovecs_buffer: [iovecs_capacity]Impl.Vector(.@"var") = undefined;
 
-    if (Operation.FileReadPositional.vectored) {
-        for (data) |buf| if (buf.len != 0)
-            addVector(.@"var", &iovecs, &iovecs_count, buf);
-    }
-
-    const point = rio.waitPoint();
-    point.submit(.{ .file_read_positional = .{
-        .file_handle = file.handle,
-        .data = if (Operation.FileReadPositional.vectored)
-            iovecs[0..iovecs_count]
-        else
-            data[0],
-        .offset = offset,
-    } }, rio);
-
+    rio.submitFileRead(&iovecs_buffer, file.handle, .{ .positional = offset }, data);
     rio.block(.submission);
-    return rio.unblock(point.awaitee.operation.primary.storage.completion.result.file_read_positional);
+
+    return rio.unblock(
+        rio.waitPoint().awaitee.operation.primary.storage.completion.result.file_read,
+    ) catch |err| switch (err) {
+        error.ConnectionResetByPeer,
+        error.SocketUnconnected,
+        error.EndOfStream,
+        => unreachable, // positional
+        else => |e| e,
+    };
 }
 
 fn fileClose(userdata: ?*anyopaque, files: []const Io.File) void {
@@ -1021,7 +1032,7 @@ fn fileWritePositional(
     const rio: *RemiellIo = @ptrCast(@alignCast(userdata));
     try rio.checkCancel();
 
-    const iovecs_capacity = if (Operation.FileReadPositional.vectored) 8 else 0;
+    const iovecs_capacity = if (Operation.FileWrite.vectored) 8 else 0;
     var iovecs_buffer: [iovecs_capacity]Impl.Vector(.@"const") = undefined;
     if (!rio.submitFileWrite(&iovecs_buffer, file.handle, .{ .positional = offset }, header, data, splat))
         return 0;
@@ -1083,6 +1094,31 @@ fn submitFileWrite(
     }
 
     return true;
+}
+
+fn submitFileRead(
+    rio: *RemiellIo,
+    iovecs_buffer: []Impl.Vector(.@"var"),
+    file: Io.File.Handle,
+    mode: FileOperationMode,
+    data: []const []u8,
+) void {
+    var iovecs_count: usize = 0;
+
+    if (Operation.FileRead.vectored) {
+        for (data) |buf| if (buf.len != 0)
+            addVector(.@"var", iovecs_buffer, &iovecs_count, buf);
+    }
+
+    const point = rio.waitPoint();
+    point.submit(.{ .file_read = .{
+        .file_handle = file,
+        .mode = mode,
+        .data = if (Operation.FileRead.vectored)
+            iovecs_buffer[0..iovecs_count]
+        else
+            data[0],
+    } }, rio);
 }
 
 fn waitPoint(rio: *RemiellIo) *WaitPoint {
@@ -1208,7 +1244,7 @@ pub const Operation = union(enum) {
     net_receive: NetReceive,
     net_send: NetSend,
     dir_open_file: DirOpenFile,
-    file_read_positional: FileReadPositional,
+    file_read: FileRead,
     create_dir: CreateDir,
     dir_create_file: DirCreateFile,
     file_write: FileWrite,
@@ -1284,17 +1320,19 @@ pub const Operation = union(enum) {
         pub const Result = Error!Io.File.Handle;
     };
 
-    pub const FileReadPositional = struct {
+    pub const FileRead = struct {
         pub const vectored = native_os != .windows;
 
         file_handle: Io.File.Handle,
+        mode: FileOperationMode,
         data: if (vectored)
             []const Impl.Vector(.@"var")
         else
             []u8,
-        offset: u64,
 
-        pub const Error = Io.File.ReadPositionalError;
+        pub const Error = Io.File.ReadPositionalError ||
+            Io.Operation.FileReadStreaming.Error ||
+            Io.Cancelable;
 
         pub const Result = Error!usize;
     };
