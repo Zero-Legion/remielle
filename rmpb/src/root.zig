@@ -302,7 +302,7 @@ fn decodePackedValues(
     var buf: [128]u8 = undefined;
     var limited = reader.limited(limit, &buf);
 
-    while (decodeValue(&limited.reader, arena, Value, desc_set, field_desc)) |value|
+    while (decodeValue(Value, desc_set, field_desc, arena, &limited.interface)) |value|
         try destination.append(arena, value)
     else |err| switch (err) {
         error.EndOfStream => {},

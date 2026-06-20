@@ -201,18 +201,51 @@ pub const HallAvatar = enum(u32) {
 };
 
 pub fn toPlayerSave(props: *Properties.List, arena: Allocator, player: Player) Allocator.Error!pb.PlayerSave {
-    _ = arena;
-
     const index = @intFromEnum(player);
+
     const basic_info = props.getPtr(.basic_info, index);
+    const basic_save: pb.BasicSave = .{
+        .level = basic_info.level.toInt(),
+        .avatar_id = basic_info.avatar.toInt(),
+        .control_avatar_id = basic_info.control_avatar.toInt(),
+        .control_guise_avatar_id = basic_info.control_guise_avatar.toInt(),
+    };
+
+    const avatar = props.getPtr(.avatar, index);
+    const avatar_count = avatar.indexes.count();
+
+    var avatar_save: pb.AvatarSave = .init;
+    try avatar_save.items.ensureTotalCapacity(arena, avatar_count);
+
+    for (
+        avatar.ids[0..avatar_count],
+        avatar.meta[0..avatar_count],
+        avatar.weapon_uids[0..avatar_count],
+        avatar.equipment_uids[0..avatar_count],
+    ) |id, *meta, weapon_uid, *equipment_uids| {
+        var skill_levels: std.ArrayList(u32) = try .initCapacity(arena, Avatar.Skill.count);
+
+        for (meta.skill_levels) |level|
+            skill_levels.appendAssumeCapacity(level.toInt());
+
+        avatar_save.items.appendAssumeCapacity(.{
+            .id = @intFromEnum(id),
+            .level = meta.level.toInt(),
+            .exp = meta.exp,
+            .rank = meta.rank.toInt(),
+            .talents = meta.talents.toInt(),
+            .talent_switch = @intFromEnum(meta.talent_switch),
+            .favorite = meta.flags.favorite,
+            .skill_levels = skill_levels,
+            .skin_id = meta.skin.toInt(),
+            .weapon_uid = @intFromEnum(weapon_uid),
+            .equipment_uids = .fromOwnedSlice(try arena.dupe(u32, @ptrCast(equipment_uids))),
+        });
+    }
 
     return .{
-        .basic = .{
-            .level = basic_info.level.toInt(),
-            .avatar_id = basic_info.avatar.toInt(),
-            .control_avatar_id = basic_info.control_avatar.toInt(),
-            .control_guise_avatar_id = basic_info.control_guise_avatar.toInt(),
-        },
+        .basic = basic_save,
+        .avatar = avatar_save,
     };
 }
 
@@ -232,9 +265,45 @@ pub fn fromPlayerSave(
         .control_guise_avatar = @enumFromInt(basic.control_guise_avatar_id),
     } else .init;
 
-    // TODO
-    props.getPtr(.avatar, index).* = .init;
-    unlockAllAvatars(props, player);
+    if (save.avatar) |avatar_save| {
+        const avatar = props.getPtr(.avatar, index);
+        avatar.* = .init;
+
+        for (avatar_save.items.items, 0..) |*item, i| {
+            avatar.indexes.put(@enumFromInt(item.id), @intCast(i));
+            avatar.ids[i] = @enumFromInt(item.id);
+
+            avatar.meta[i] = .{
+                .level = @enumFromInt(item.level),
+                .exp = item.exp,
+                .rank = @enumFromInt(item.rank),
+                .talents = @enumFromInt(item.talents),
+                .talent_switch = @enumFromInt(item.talent_switch),
+                .flags = .{
+                    .favorite = item.favorite,
+                },
+                .skill_levels = undefined,
+                .skin = @enumFromInt(item.skin_id),
+            };
+
+            inline for (&avatar.meta[i].skill_levels, 0..) |*level, skill_i|
+                level.* = if (item.skill_levels.items.len > skill_i)
+                    @enumFromInt(item.skill_levels.items[skill_i])
+                else
+                    .maxFor(@enumFromInt(skill_i));
+
+            avatar.weapon_uids[i] = @enumFromInt(item.weapon_uid);
+
+            for (&avatar.equipment_uids[i], 0..) |*equipment_uid, slot_i|
+                equipment_uid.* = if (item.equipment_uids.items.len > slot_i)
+                    @enumFromInt(item.equipment_uids.items[slot_i])
+                else
+                    .none;
+        }
+    } else {
+        props.getPtr(.avatar, index).* = .init;
+        unlockAllAvatars(props, player);
+    }
 }
 
 const Allocator = std.mem.Allocator;
