@@ -424,6 +424,59 @@ fn drainSubmitted(iocp: *Iocp) void {
                     },
                 });
             },
+            .create_dir => |mkdir| {
+                const attr: windows.OBJECT.ATTRIBUTES = .{
+                    .RootDirectory = if (Io.Dir.path.isAbsoluteWindowsWtf16(mkdir.sub_path.space.span()))
+                        null
+                    else
+                        mkdir.at,
+                    .Attributes = .{ .INHERIT = false },
+                    .ObjectName = @constCast(&windows.UNICODE_STRING.init(mkdir.sub_path.space.span())),
+                    .SecurityDescriptor = null,
+                    .SecurityQualityOfService = null,
+                };
+
+                var iosb: windows.IO_STATUS_BLOCK = undefined;
+                var child_handle: windows.HANDLE = undefined;
+
+                iocp.completeOne(storage, .{
+                    .create_dir = switch (windows.ntdll.NtCreateFile(
+                        &child_handle,
+                        .{
+                            .GENERIC = .{ .READ = true },
+                            .STANDARD = .{ .SYNCHRONIZE = true },
+                        },
+                        &attr,
+                        &iosb,
+                        null,
+                        .{ .NORMAL = true },
+                        .VALID_FLAGS,
+                        .CREATE,
+                        .{
+                            .DIRECTORY_FILE = true,
+                            .NON_DIRECTORY_FILE = false,
+                            .IO = .SYNCHRONOUS_NONALERT,
+                            .OPEN_REPARSE_POINT = false,
+                        },
+                        null,
+                        0,
+                    )) {
+                        .SUCCESS => {
+                            _ = NtClose(child_handle);
+                        },
+                        .OBJECT_NAME_INVALID => error.BadPathName,
+                        .OBJECT_NAME_NOT_FOUND => error.FileNotFound,
+                        .OBJECT_PATH_NOT_FOUND => error.FileNotFound,
+                        .BAD_NETWORK_PATH => error.NetworkNotFound, // \\server was not found
+                        .BAD_NETWORK_NAME => error.NetworkNotFound, // \\server was found but \\server\share wasn't
+                        .ACCESS_DENIED => error.AccessDenied,
+                        .OBJECT_NAME_COLLISION => error.PathAlreadyExists,
+                        .NOT_A_DIRECTORY => error.NotDir,
+                        .USER_MAPPED_FILE => error.AccessDenied,
+                        else => |status| unexpectedNtStatus(status),
+                    },
+                });
+            },
         }
     }
 }

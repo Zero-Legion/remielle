@@ -243,6 +243,18 @@ fn drainSubmitted(u: *Uring) void {
 
                 u.outstanding += 1;
             },
+            .create_dir => |mkdir| {
+                _ = setUserdata(storage, .create_dir);
+
+                _ = u.ring.mkdirat(
+                    @intFromPtr(storage),
+                    mkdir.at,
+                    mkdir.sub_path.view(),
+                    mkdir.permissions.toMode(),
+                ) catch unreachable;
+
+                u.outstanding += 1;
+            },
         }
     }
 }
@@ -418,6 +430,30 @@ fn fillCompleted(u: *Uring) void {
 
                 u.outstanding -= 1;
             },
+            .create_dir => |*mkdir| {
+                _ = mkdir;
+
+                u.completeOne(storage, .{ .create_dir = switch (err) {
+                    .SUCCESS => {},
+                    .BADF, .INVAL => unreachable,
+                    .ACCES => error.AccessDenied,
+                    .PERM => error.PermissionDenied,
+                    .DQUOT => error.DiskQuota,
+                    .EXIST => error.PathAlreadyExists,
+                    .LOOP => error.SymLinkLoop,
+                    .MLINK => error.LinkQuotaExceeded,
+                    .NAMETOOLONG => error.NameTooLong,
+                    .NOENT => error.FileNotFound,
+                    .NOMEM => error.SystemResources,
+                    .NOSPC => error.NoSpaceLeft,
+                    .NOTDIR => error.NotDir,
+                    .ROFS => error.ReadOnlyFileSystem,
+                    .ILSEQ => error.BadPathName,
+                    else => |e| unexpected(e),
+                } });
+
+                u.outstanding -= 1;
+            },
         }
     }
 }
@@ -453,6 +489,7 @@ const RingUserdata = union(enum) {
     },
     dir_open_file: void,
     file_read_positional: void,
+    create_dir: void,
 };
 
 fn setUserdata(storage: *Operation.Storage, userdata: RingUserdata) *RingUserdata {

@@ -273,6 +273,8 @@ const vtable: Io.VTable = vtable: {
     v.dirOpenFile = dirOpenFile;
     v.fileReadPositional = fileReadPositional;
     v.fileClose = fileClose;
+    v.dirCreateDir = dirCreateDir;
+    v.dirCreateDirPath = dirCreateDirPath;
 
     break :vtable v;
 };
@@ -909,6 +911,54 @@ fn fileClose(userdata: ?*anyopaque, files: []const Io.File) void {
     };
 }
 
+fn dirCreateDir(
+    userdata: ?*anyopaque,
+    dir: Io.Dir,
+    sub_path: []const u8,
+    permissions: Io.Dir.Permissions,
+) Io.Dir.CreateDirError!void {
+    const rio: *RemiellIo = @ptrCast(@alignCast(userdata));
+    try rio.checkCancel();
+
+    var path_buffer: Impl.PathBuffer = undefined;
+    try path_buffer.initPinned(dir.handle, sub_path);
+
+    const point = rio.waitPoint();
+    point.submit(.{ .create_dir = .{
+        .at = dir.handle,
+        .sub_path = &path_buffer,
+        .permissions = permissions,
+    } }, rio);
+
+    rio.block(.submission);
+    return rio.unblock(point.awaitee.operation.primary.storage.completion.result.create_dir);
+}
+
+fn dirCreateDirPath(
+    userdata: ?*anyopaque,
+    dir: Io.Dir,
+    sub_path: []const u8,
+    permissions: Io.Dir.Permissions,
+) Io.Dir.CreateDirPathError!Io.Dir.CreatePathStatus {
+    var it = Io.Dir.path.componentIterator(sub_path);
+    var status: Io.Dir.CreatePathStatus = .existed;
+    var component = it.last() orelse return error.BadPathName;
+
+    while (true) {
+        if (dirCreateDir(userdata, dir, component.path, permissions)) |_| {
+            status = .created;
+        } else |err| switch (err) {
+            error.PathAlreadyExists => {},
+            error.FileNotFound => |e| {
+                component = it.previous() orelse return e;
+                continue;
+            },
+            else => |e| return e,
+        }
+        component = it.next() orelse return status;
+    }
+}
+
 fn waitPoint(rio: *RemiellIo) *WaitPoint {
     const current = rio.current_coro orelse return &rio.naked_wait;
     return &current.wait_point;
@@ -1028,6 +1078,7 @@ pub const Operation = union(enum) {
     net_send: NetSend,
     dir_open_file: DirOpenFile,
     file_read_positional: FileReadPositional,
+    create_dir: CreateDir,
 
     pub const NetAccept = struct {
         listener_handle: Io.net.Socket.Handle,
@@ -1113,6 +1164,16 @@ pub const Operation = union(enum) {
         pub const Error = Io.File.ReadPositionalError;
 
         pub const Result = Error!usize;
+    };
+
+    pub const CreateDir = struct {
+        at: Io.Dir.Handle,
+        sub_path: *Impl.PathBuffer,
+        permissions: Io.Dir.Permissions,
+
+        pub const Error = Io.Dir.CreateDirError;
+
+        pub const Result = Error!void;
     };
 
     pub const Tag = @typeInfo(Operation).@"union".tag_type.?;
