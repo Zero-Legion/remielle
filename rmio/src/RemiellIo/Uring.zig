@@ -255,6 +255,26 @@ fn drainSubmitted(u: *Uring) void {
 
                 u.outstanding += 1;
             },
+            .dir_create_file => |create| {
+                std.debug.assert(create.options.lock == .none); // Not implemented
+                _ = setUserdata(storage, .dir_create_file);
+
+                const flags: linux.O = .{
+                    .ACCMODE = if (create.options.read) .RDWR else .WRONLY,
+                    .CREAT = true,
+                    .TRUNC = create.options.truncate,
+                };
+
+                _ = u.ring.openat(
+                    @intFromPtr(storage),
+                    create.at,
+                    create.sub_path.view(),
+                    flags,
+                    create.options.permissions.toMode(),
+                ) catch unreachable;
+
+                u.outstanding += 1;
+            },
         }
     }
 }
@@ -454,6 +474,29 @@ fn fillCompleted(u: *Uring) void {
 
                 u.outstanding -= 1;
             },
+            .dir_create_file => |*create| {
+                _ = create;
+
+                u.completeOne(storage, .{ .dir_create_file = switch (err) {
+                    .SUCCESS => @intCast(cqe.res),
+                    .BADF, .INVAL => unreachable,
+                    .ACCES => error.AccessDenied,
+                    .ISDIR => error.IsDir,
+                    .NOTDIR => error.NotDir,
+                    .BUSY => error.DeviceBusy,
+                    .NOENT => error.FileNotFound,
+                    .EXIST => error.PathAlreadyExists,
+                    .MFILE => error.ProcessFdQuotaExceeded,
+                    .NFILE => error.SystemFdQuotaExceeded,
+                    .NOMEM => error.SystemResources,
+                    .PERM => error.PermissionDenied,
+                    .ROFS => error.ReadOnlyFileSystem,
+                    .NOSPC => error.NoSpaceLeft,
+                    else => |e| unexpected(e),
+                } });
+
+                u.outstanding -= 1;
+            },
         }
     }
 }
@@ -490,6 +533,7 @@ const RingUserdata = union(enum) {
     dir_open_file: void,
     file_read_positional: void,
     create_dir: void,
+    dir_create_file: void,
 };
 
 fn setUserdata(storage: *Operation.Storage, userdata: RingUserdata) *RingUserdata {

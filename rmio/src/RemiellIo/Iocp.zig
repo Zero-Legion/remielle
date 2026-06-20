@@ -477,6 +477,71 @@ fn drainSubmitted(iocp: *Iocp) void {
                     },
                 });
             },
+            .dir_create_file => |*create| {
+                const sub_path_w = create.sub_path.space.span();
+                const dir_handle = if (Io.Dir.path.isAbsoluteWindowsWtf16(sub_path_w))
+                    null
+                else
+                    create.at;
+
+                const attr: windows.OBJECT.ATTRIBUTES = .{
+                    .RootDirectory = dir_handle,
+                    .ObjectName = @constCast(&sub_path_w.string()),
+                };
+
+                const create_disposition: windows.FILE.CREATE_DISPOSITION = if (create.options.truncate)
+                    .OVERWRITE_IF
+                else
+                    .OPEN_IF;
+
+                const access_mask: windows.ACCESS_MASK = .{
+                    .STANDARD = .{ .SYNCHRONIZE = true },
+                    .GENERIC = .{
+                        .WRITE = true,
+                        .READ = create.options.read,
+                    },
+                };
+
+                var iosb: windows.IO_STATUS_BLOCK = undefined;
+                var result: windows.HANDLE = undefined;
+
+                iocp.completeOne(storage, .{
+                    .dir_create_file = switch (windows.ntdll.NtCreateFile(
+                        &result,
+                        access_mask,
+                        &attr,
+                        &iosb,
+                        null,
+                        .{ .NORMAL = true },
+                        .VALID_FLAGS, // share access
+                        create_disposition,
+                        .{
+                            .NON_DIRECTORY_FILE = true,
+                            .IO = .SYNCHRONOUS_NONALERT,
+                        },
+                        null,
+                        0,
+                    )) {
+                        .SUCCESS => result,
+                        .OBJECT_NAME_INVALID => error.BadPathName,
+                        .OBJECT_NAME_NOT_FOUND => error.FileNotFound,
+                        .OBJECT_PATH_NOT_FOUND => error.FileNotFound,
+                        .BAD_NETWORK_PATH => error.NetworkNotFound, // \\server was not found
+                        .BAD_NETWORK_NAME => error.NetworkNotFound, // \\server was found but \\server\share wasn't
+                        .NO_MEDIA_IN_DEVICE => error.NoDevice,
+                        .ACCESS_DENIED => error.AccessDenied,
+                        .PIPE_BUSY => error.PipeBusy,
+                        .PIPE_NOT_AVAILABLE => error.NoDevice,
+                        .OBJECT_NAME_COLLISION => error.PathAlreadyExists,
+                        .FILE_IS_A_DIRECTORY => error.IsDir,
+                        .NOT_A_DIRECTORY => error.NotDir,
+                        .USER_MAPPED_FILE => error.AccessDenied,
+                        .VIRUS_INFECTED, .VIRUS_DELETED => error.AntivirusInterference,
+                        .DISK_FULL => error.NoSpaceLeft,
+                        else => |status| unexpectedNtStatus(status),
+                    },
+                });
+            },
         }
     }
 }

@@ -275,6 +275,7 @@ const vtable: Io.VTable = vtable: {
     v.fileClose = fileClose;
     v.dirCreateDir = dirCreateDir;
     v.dirCreateDirPath = dirCreateDirPath;
+    v.dirCreateFile = dirCreateFile;
 
     break :vtable v;
 };
@@ -959,6 +960,35 @@ fn dirCreateDirPath(
     }
 }
 
+fn dirCreateFile(
+    userdata: ?*anyopaque,
+    dir: Io.Dir,
+    sub_path: []const u8,
+    options: Io.Dir.CreateFileOptions,
+) Io.File.OpenError!Io.File {
+    const rio: *RemiellIo = @ptrCast(@alignCast(userdata));
+    try rio.checkCancel();
+
+    var path_buffer: Impl.PathBuffer = undefined;
+    try path_buffer.initPinned(dir.handle, sub_path);
+
+    const point = rio.waitPoint();
+    point.submit(.{ .dir_create_file = .{
+        .at = dir.handle,
+        .sub_path = &path_buffer,
+        .options = options,
+    } }, rio);
+
+    rio.block(.submission);
+
+    const handle = try rio.unblock(point.awaitee.operation.primary.storage.completion.result.dir_create_file);
+
+    return .{
+        .handle = handle,
+        .flags = .{ .nonblocking = false },
+    };
+}
+
 fn waitPoint(rio: *RemiellIo) *WaitPoint {
     const current = rio.current_coro orelse return &rio.naked_wait;
     return &current.wait_point;
@@ -1079,6 +1109,7 @@ pub const Operation = union(enum) {
     dir_open_file: DirOpenFile,
     file_read_positional: FileReadPositional,
     create_dir: CreateDir,
+    dir_create_file: DirCreateFile,
 
     pub const NetAccept = struct {
         listener_handle: Io.net.Socket.Handle,
@@ -1174,6 +1205,16 @@ pub const Operation = union(enum) {
         pub const Error = Io.Dir.CreateDirError;
 
         pub const Result = Error!void;
+    };
+
+    pub const DirCreateFile = struct {
+        at: Io.Dir.Handle,
+        sub_path: *Impl.PathBuffer,
+        options: Io.Dir.CreateFileOptions,
+
+        pub const Error = Io.File.OpenError;
+
+        pub const Result = Error!Io.File.Handle;
     };
 
     pub const Tag = @typeInfo(Operation).@"union".tag_type.?;
