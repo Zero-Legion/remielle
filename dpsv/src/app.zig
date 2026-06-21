@@ -24,6 +24,7 @@ pub fn listen(
     var client_group: Io.Group = .init;
     defer client_group.cancel(io);
 
+    log.info("waiting for requests at http://{f}", .{address});
     defer log.info("shutting down...", .{});
 
     while (true) {

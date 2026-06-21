@@ -38,6 +38,8 @@ pub fn bind(
     var server: Server = .init(&per_message_arena, csprng, concurrent_session_limit);
     var buffer: [kcp.mtu]u8 = undefined;
 
+    log.info("waiting for clients at udp://{f}", .{udp_address});
+
     recv_loop: while (true) {
         const udp_message = udp_socket.receive(io, &buffer) catch |err| switch (err) {
             // The size of packet was greater than `mtu`,
