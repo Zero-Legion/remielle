@@ -12242,6 +12242,12 @@ pub const LeaveCurSceneCsReq = struct {
     pub const pb_desc_name = "LeaveCurSceneCsReq";
 };
 
+pub const LeaveCurSceneScRsp = struct {
+    pub const init: @This() = .{};
+    pub const pb_desc_name = "LeaveCurSceneScRsp";
+    retcode: i32 = 0,
+};
+
 pub const DDNMEMMOCJP = struct {
     pub const init: @This() = .{};
     pub const pb_desc_name = "DDNMEMMOCJP";

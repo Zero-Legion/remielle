@@ -15,6 +15,23 @@ pub fn enterWorld(
     response.set(.init);
 }
 
+pub fn leaveCurScene(
+    message: Message(pb.LeaveCurSceneCsReq),
+    changes: Changes.Builder(.{
+        Changes.GameMode,
+    }),
+    response: Response(pb.LeaveCurSceneScRsp),
+) !void {
+    _ = message;
+
+    const mode_switch: Changes.GameMode = .{ .hall = .{
+        .section_id = .MainCity_Street,
+    } };
+
+    changes.insert(mode_switch);
+    response.set(.init);
+}
+
 pub fn enterSectionComplete(
     message: Message(pb.EnterSectionCompleteCsReq),
     response: Response(pb.EnterSectionCompleteScRsp),

@@ -74,6 +74,14 @@ pub fn startTrainingQuest(
     response.set(.init);
 }
 
+pub fn endBattle(
+    message: Message(pb.EndBattleCsReq),
+    response: Response(pb.EndBattleScRsp),
+) !void {
+    _ = message;
+    response.set(.{ .fight_settle = .init });
+}
+
 const templates = Assets.templates;
 
 const Changes = logic.Changes;
