@@ -13,10 +13,36 @@ pub const init: Changes = .{
 /// Game mode switch.
 pub const GameMode = union(enum) {
     hall: Hall,
+    training: Training,
 
     /// Load hall game mode.
     pub const Hall = struct {
         section_id: templates.section_config.Id,
+    };
+
+    /// Load training game mode.
+    pub const Training = struct {
+        quest: templates.training_quest.Id,
+        avatars: AvatarSlot.List,
+
+        pub const AvatarSlot = enum(u32) {
+            pub const count = 3;
+            pub const List = [count]AvatarSlot;
+
+            none = 0,
+            _,
+
+            pub inline fn fromId(id: templates.avatar_base.Id) AvatarSlot {
+                return @enumFromInt(@intFromEnum(id));
+            }
+
+            pub inline fn toId(slot: AvatarSlot) ?templates.avatar_base.Id {
+                return switch (slot) {
+                    .none => null,
+                    else => |id| @enumFromInt(@intFromEnum(id)),
+                };
+            }
+        };
     };
 };
 

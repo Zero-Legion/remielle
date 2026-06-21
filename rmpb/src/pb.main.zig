@@ -2836,6 +2836,12 @@ pub const StartTrainingQuestCsReq = struct {
     KKMKIFHAJGM: std.ArrayList(u32) = .empty,
 };
 
+pub const StartTrainingQuestScRsp = struct {
+    pub const init: @This() = .{};
+    pub const pb_desc_name = "StartTrainingQuestScRsp";
+    retcode: i32 = 0,
+};
+
 pub const BMOFBKLOLOA = struct {
     pub const init: @This() = .{};
     pub const pb_desc_name = "BMOFBKLOLOA";
