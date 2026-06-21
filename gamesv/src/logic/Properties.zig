@@ -1,7 +1,9 @@
 pub const Avatar = @import("Properties/Avatar.zig");
+pub const Weapon = @import("Properties/Weapon.zig");
 
 basic_info: BasicInfo,
 avatar: Avatar,
+weapon: Weapon,
 
 pub const List = rmmem.RemielleArrayList(
     rmmem.suggestBucketSize(64, Properties),
@@ -9,18 +11,15 @@ pub const List = rmmem.RemielleArrayList(
     u32,
 );
 
-pub fn initAlloc(uninit: *Properties, arena: Allocator, slots: usize) Allocator.Error!void {
-    uninit.basic_info = try arena.alloc(BasicInfo, slots);
-    uninit.avatar = try arena.alloc(Avatar, slots);
-}
-
 pub fn setDefaultsAt(list: *List, at: Player) void {
     const index = at.toInt();
 
     list.getPtr(.basic_info, index).* = .init;
     list.getPtr(.avatar, index).* = .init;
+    list.getPtr(.weapon, index).* = .init;
 
     unlockAllAvatars(list, at);
+    unlockAllWeapons(list, at);
 }
 
 fn unlockAllAvatars(props: *Properties.List, at: Player) void {
@@ -48,6 +47,21 @@ fn unlockAllAvatars(props: *Properties.List, at: Player) void {
         avatar.weapon_uids[i] = .none;
         avatar.equipment_uids[i] = @splat(.none);
     };
+}
+
+fn unlockAllWeapons(props: *Properties.List, at: Player) void {
+    const weapon = props.getPtr(.weapon, at.toInt());
+
+    for (templates.weapon.entries) |template| {
+        defer weapon.count += 1;
+        const i = weapon.count;
+
+        weapon.uids[i] = @enumFromInt(i);
+        weapon.ids[i] = template.getId();
+        weapon.levels[i] = .max;
+        weapon.stars[i] = .max;
+        weapon.refines[i] = .max;
+    }
 }
 
 pub const immutable_subset_marker_name = "logic_properties_subset_marker";
@@ -243,9 +257,30 @@ pub fn toPlayerSave(props: *Properties.List, arena: Allocator, player: Player) A
         });
     }
 
+    const weapon = props.getPtr(.weapon, index);
+    var weapon_save: pb.WeaponSave = .init;
+    try weapon_save.items.ensureTotalCapacity(arena, weapon.count);
+
+    for (
+        weapon.uids[0..weapon.count],
+        weapon.ids[0..weapon.count],
+        weapon.levels[0..weapon.count],
+        weapon.stars[0..weapon.count],
+        weapon.refines[0..weapon.count],
+    ) |uid, id, level, star, refine| {
+        weapon_save.items.appendAssumeCapacity(.{
+            .id = @intFromEnum(id),
+            .uid = @intFromEnum(uid),
+            .level = level.toInt(),
+            .star = star.toInt(),
+            .refine = refine.toInt(),
+        });
+    }
+
     return .{
         .basic = basic_save,
         .avatar = avatar_save,
+        .weapon = weapon_save,
     };
 }
 
@@ -303,6 +338,24 @@ pub fn fromPlayerSave(
     } else {
         props.getPtr(.avatar, index).* = .init;
         unlockAllAvatars(props, player);
+    }
+
+    if (save.weapon) |weapon_save| {
+        const weapon = props.getPtr(.weapon, index);
+        weapon.* = .init;
+
+        weapon.count = @intCast(weapon_save.items.items.len);
+
+        for (weapon_save.items.items, 0..) |*item, i| {
+            weapon.uids[i] = @enumFromInt(item.uid);
+            weapon.ids[i] = @enumFromInt(item.id);
+            weapon.levels[i] = @enumFromInt(item.level);
+            weapon.stars[i] = @enumFromInt(item.star);
+            weapon.refines[i] = @enumFromInt(item.refine);
+        }
+    } else {
+        props.getPtr(.weapon, index).* = .init;
+        unlockAllWeapons(props, player);
     }
 }
 

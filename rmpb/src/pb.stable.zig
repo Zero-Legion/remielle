@@ -40,8 +40,10 @@ pub const PlayerSave = struct {
     pub const pb_desc_name = "PlayerSave";
     basic: ?BasicSave = null,
     avatar: ?AvatarSave = null,
+    weapon: ?WeaponSave = null,
     pub const basic_field_desc: FieldDesc = .{ .number = 1, .xor = 0 };
     pub const avatar_field_desc: FieldDesc = .{ .number = 2, .xor = 0 };
+    pub const weapon_field_desc: FieldDesc = .{ .number = 3, .xor = 0 };
 };
 
 pub const BasicSave = struct {
@@ -89,5 +91,27 @@ pub const AvatarItemSave = struct {
     pub const skin_id_field_desc: FieldDesc = .{ .number = 9, .xor = 0 };
     pub const weapon_uid_field_desc: FieldDesc = .{ .number = 10, .xor = 0 };
     pub const equipment_uids_field_desc: FieldDesc = .{ .number = 11, .xor = 0 };
+};
+
+pub const WeaponSave = struct {
+    pub const init: @This() = .{};
+    pub const pb_desc_name = "WeaponSave";
+    items: std.ArrayList(WeaponItemSave) = .empty,
+    pub const items_field_desc: FieldDesc = .{ .number = 1, .xor = 0 };
+};
+
+pub const WeaponItemSave = struct {
+    pub const init: @This() = .{};
+    pub const pb_desc_name = "WeaponItemSave";
+    uid: u32 = 0,
+    id: u32 = 0,
+    level: u32 = 0,
+    star: u32 = 0,
+    refine: u32 = 0,
+    pub const uid_field_desc: FieldDesc = .{ .number = 1, .xor = 0 };
+    pub const id_field_desc: FieldDesc = .{ .number = 2, .xor = 0 };
+    pub const level_field_desc: FieldDesc = .{ .number = 3, .xor = 0 };
+    pub const star_field_desc: FieldDesc = .{ .number = 4, .xor = 0 };
+    pub const refine_field_desc: FieldDesc = .{ .number = 5, .xor = 0 };
 };
 

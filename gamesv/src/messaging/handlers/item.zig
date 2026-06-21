@@ -1,9 +1,30 @@
 pub fn getWeaponData(
     message: Message(pb.GetWeaponDataCsReq),
+    properties: Properties.Immutable(.{
+        Properties.Weapon,
+    }),
     response: Response(pb.GetWeaponDataScRsp),
 ) !void {
     _ = message;
-    response.set(.init);
+
+    var weapon_list: ArrayList(pb.WeaponInfo) = try .initCapacity(
+        response.allocator,
+        properties.weapon.count,
+    );
+
+    var i: u16 = 0;
+
+    while (i < properties.weapon.count) : (i += 1) {
+        weapon_list.appendAssumeCapacity(.{
+            .uid = properties.weapon.uids[i].toInt(),
+            .id = @intFromEnum(properties.weapon.ids[i]),
+            .level = properties.weapon.levels[i].toInt(),
+            .star = properties.weapon.stars[i].toInt(),
+            .refine_level = properties.weapon.refines[i].toInt(),
+        });
+    }
+
+    response.set(.{ .weapon_list = weapon_list });
 }
 
 pub fn getEquipData(
@@ -43,9 +64,12 @@ pub fn getWishlistData(
 
 const templates = Assets.templates;
 
+const ArrayList = std.ArrayList;
 const Message = handlers.Message;
 const Response = handlers.Response;
+const Properties = logic.Properties;
 
+const logic = @import("../../logic.zig");
 const Assets = @import("../../Assets.zig");
 const handlers = @import("../handlers.zig");
 
