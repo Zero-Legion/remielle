@@ -46,6 +46,8 @@ pub fn main(init: Init.Minimal) void {
     defer io_impl.deinit();
     const io = io_impl.io();
 
+    rmio.splash.print();
+
     const listen_args = .{ io, &data, &listen_address };
 
     var app_future = io.concurrent(app.listen, listen_args) catch |concurrent_err| switch (concurrent_err) {

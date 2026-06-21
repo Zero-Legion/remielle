@@ -45,6 +45,8 @@ pub fn main(init: Init.Minimal) void {
     defer io_impl.deinit();
     const io = io_impl.io();
 
+    rmio.splash.print();
+
     var csprng_seed: [DefaultCsprng.secret_seed_length]u8 = undefined;
     io.randomSecure(&csprng_seed) catch |err| switch (err) {
         error.Canceled => unreachable, // no
