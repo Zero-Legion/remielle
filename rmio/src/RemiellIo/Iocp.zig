@@ -3,13 +3,7 @@ submissions: std.DoublyLinkedList,
 completions: std.DoublyLinkedList,
 outstanding: usize,
 
-pub const PathBuffer = struct {
-    space: Io.Threaded.WindowsPathSpace,
-
-    pub fn initPinned(buffer: *PathBuffer, dir: Io.Dir.Handle, path: []const u8) !void {
-        buffer.space = try Io.Threaded.sliceToPrefixedFileW(dir, path, .{});
-    }
-};
+pub const PathBuffer = @import("Iocp/PathBuffer.zig");
 
 pub fn init() RemiellIo.InitError!Iocp {
     var data: ws2_32.WSADATA = undefined;
