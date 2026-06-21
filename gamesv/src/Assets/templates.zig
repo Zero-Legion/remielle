@@ -5,3 +5,14 @@ pub const post_girl_config = @import("templates/post_girl_config.zig");
 pub const section_config = @import("templates/section_config.zig");
 pub const yorozuya_level = @import("templates/yorozuya_level.zig");
 pub const training_quest = @import("templates/training_quest.zig");
+pub const weapon = @import("templates/weapon.zig");
+
+pub const Property = struct {
+    property: u32,
+    value: i32,
+};
+
+pub const ItemCount = struct {
+    item_id: u32,
+    number: u32,
+};
