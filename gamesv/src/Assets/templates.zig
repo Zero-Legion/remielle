@@ -4,3 +4,4 @@ pub const unlock_config = @import("templates/unlock_config.zig");
 pub const post_girl_config = @import("templates/post_girl_config.zig");
 pub const section_config = @import("templates/section_config.zig");
 pub const yorozuya_level = @import("templates/yorozuya_level.zig");
+pub const training_quest = @import("templates/training_quest.zig");
