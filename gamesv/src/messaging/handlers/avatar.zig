@@ -147,6 +147,67 @@ pub fn avatarSkinUnDress(
     response.set(.init);
 }
 
+pub fn weaponDress(
+    message: Message(pb.WeaponDressCsReq),
+    properties: Properties.Immutable(.{
+        Properties.Avatar,
+        Properties.Weapon,
+    }),
+    changes: Changes.Builder(.{
+        Changes.Avatar,
+    }),
+    response: Response(pb.WeaponDressScRsp),
+) !void {
+    const maybe_index: ?u32 = avatar_index: {
+        const id = std.enums.fromInt(Properties.Avatar.Id, message.data.avatar_id) orelse
+            break :avatar_index null;
+
+        break :avatar_index properties.avatar.indexes.get(id);
+    };
+
+    const index = maybe_index orelse
+        return response.fail(1);
+
+    const weapon_uid = Properties.Weapon.Uid.fromInt(message.data.weapon_uid) orelse
+        return response.fail(1);
+
+    if (std.mem.findScalar(
+        Properties.Weapon.Uid,
+        properties.weapon.uids[0..properties.weapon.count],
+        weapon_uid,
+    ) == null) return response.fail(1);
+
+    const avatars = try changes.allocator.alloc(Changes.Avatar, 2);
+
+    avatars[0] = .{
+        .id = properties.avatar.ids[index],
+        .meta = properties.avatar.meta[index],
+        .weapon_uid = @enumFromInt(weapon_uid.toInt()),
+        .equipment_uids = properties.avatar.equipment_uids[index],
+    };
+
+    var changes_count: usize = 1;
+
+    if (std.mem.findScalar(
+        Avatar.OptionalUID,
+        properties.avatar.weapon_uids[0..properties.avatar.count()],
+        @enumFromInt(weapon_uid.toInt()),
+    )) |prev_owner_index| {
+        // Another avatar has this weapon equipped, swap them.
+        changes_count = 2;
+
+        avatars[1] = .{
+            .id = properties.avatar.ids[prev_owner_index],
+            .meta = properties.avatar.meta[prev_owner_index],
+            .weapon_uid = properties.avatar.weapon_uids[index],
+            .equipment_uids = properties.avatar.equipment_uids[prev_owner_index],
+        };
+    }
+
+    changes.insert(avatars[0..changes_count]);
+    response.set(.init);
+}
+
 const Avatar = Properties.Avatar;
 const ArrayList = std.ArrayList;
 const templates = Assets.templates;

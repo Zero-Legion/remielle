@@ -32622,6 +32622,12 @@ pub const WeaponDressCsReq = struct {
     weapon_uid: u32 = 0,
 };
 
+pub const WeaponDressScRsp = struct {
+    pub const init: @This() = .{};
+    pub const pb_desc_name = "WeaponDressScRsp";
+    retcode: i32 = 0,
+};
+
 pub const GJMJNDLMCBD = struct {
     pub const init: @This() = .{};
     pub const pb_desc_name = "GJMJNDLMCBD";
