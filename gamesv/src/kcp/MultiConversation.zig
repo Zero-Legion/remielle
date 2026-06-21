@@ -331,7 +331,7 @@ pub const Reader = struct {
                     .readVec = readVec,
                     .rebase = rebase,
                 },
-                .buffer = &ring.buffers[head],
+                .buffer = ring.buffers[head][0..ring.len[head]],
                 .end = ring.len[head],
                 .seek = 0,
             },
@@ -354,6 +354,9 @@ pub const Reader = struct {
         switch (r.ring.frg[r.cur]) {
             .last => return error.EndOfStream,
             _ => {
+                if (io_r.seek == io_r.end)
+                    return nextBuffer(io_r);
+
                 // This means that rebase was called repeatedly. Should not happen.
                 if (r.seek_next != 0)
                     return error.ReadFailed;
@@ -364,6 +367,7 @@ pub const Reader = struct {
 
                 io_r.seek = 0;
                 io_r.end = leftover;
+                io_r.buffer.len = leftover;
 
                 // Steal some data from the next buffer.
                 const next_seg = (r.cur + 1) % RecvRing.size;
@@ -373,6 +377,8 @@ pub const Reader = struct {
                     return error.EndOfStream;
 
                 @memcpy(io_r.buffer[leftover..capacity], next_buffer[0 .. capacity - leftover]);
+
+                io_r.buffer.len = capacity;
                 io_r.end = capacity;
                 r.seek_next = capacity - leftover;
             },
@@ -387,7 +393,7 @@ pub const Reader = struct {
             .last => return error.EndOfStream,
             _ => {
                 r.cur = (r.cur + 1) % RecvRing.size;
-                io_r.buffer = &r.ring.buffers[r.cur];
+                io_r.buffer = r.ring.buffers[r.cur][0..r.ring.len[r.cur]];
                 io_r.end = r.ring.len[r.cur];
                 io_r.seek = r.seek_next;
                 r.seek_next = 0;

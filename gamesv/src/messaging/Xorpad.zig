@@ -106,7 +106,7 @@ pub const Reader = struct {
             .nested = nested,
             .remaining = limit -| (nested.end - nested.seek),
             .interface = .{
-                .buffer = nested.buffer,
+                .buffer = nested.buffer[0..@min(nested.seek + limit, nested.buffer.len)],
                 .seek = nested.seek,
                 .end = @min(nested.seek + limit, nested.end),
                 .vtable = &.{
@@ -144,12 +144,16 @@ pub const Reader = struct {
         const wrapped: *Reader = @alignCast(@fieldParentPtr("interface", io_r));
         if (wrapped.remaining == 0) return error.EndOfStream;
 
+        if (io_r.seek == io_r.end)
+            return refill(io_r);
+
         const leftover = io_r.end - io_r.seek;
         wrapped.nested.end = io_r.end;
         wrapped.nested.seek = io_r.seek;
 
         try wrapped.nested.vtable.rebase(wrapped.nested, capacity);
 
+        wrapped.interface.buffer = wrapped.nested.buffer;
         wrapped.interface.seek = wrapped.nested.seek;
         wrapped.interface.end = @min(wrapped.nested.seek + wrapped.remaining, wrapped.nested.end);
 
@@ -165,13 +169,19 @@ pub const Reader = struct {
 
     fn refill(io_r: *Io.Reader) Io.Reader.Error!void {
         if (io_r.end != io_r.seek) return;
-
         const wrapped: *Reader = @alignCast(@fieldParentPtr("interface", io_r));
+
         if (wrapped.remaining == 0) return error.EndOfStream;
 
-        _ = try wrapped.nested.readVec(&.{});
+        wrapped.nested.seek = wrapped.nested.end;
 
-        wrapped.interface.buffer = wrapped.nested.buffer;
+        _ = try wrapped.nested.vtable.readVec(wrapped.nested, &.{});
+
+        wrapped.interface.buffer = wrapped.nested.buffer[0..@min(
+            wrapped.nested.seek + wrapped.remaining,
+            wrapped.nested.end,
+        )];
+
         wrapped.interface.end = @min(wrapped.nested.seek + wrapped.remaining, wrapped.nested.end);
         wrapped.interface.seek = wrapped.nested.seek;
 
