@@ -2,6 +2,7 @@ pub fn switchGameMode(
     properties: logic.Properties.Immutable(.{
         logic.Properties.BasicInfo,
         logic.Properties.Avatar,
+        logic.Properties.Weapon,
     }),
     changes: logic.Changes.Subset(.{
         logic.Changes.GameMode,
@@ -38,6 +39,11 @@ pub fn switchGameMode(
                         training.avatars.len,
                     );
 
+                    var weapon_list: ArrayList(pb.WeaponInfo) = try .initCapacity(
+                        notify.allocator,
+                        training.avatars.len,
+                    );
+
                     for (training.avatars) |slot| if (slot.toId()) |avatar_id| {
                         const index = properties.avatar.indexes.get(avatar_id).?;
 
@@ -48,10 +54,28 @@ pub fn switchGameMode(
                             properties.avatar.weapon_uids[index],
                             properties.avatar.equipment_uids[index],
                         ));
+
+                        if (properties.avatar.weapon_uids[index].unwrap()) |weapon_uid_int| {
+                            const weapon_uid = logic.Properties.Weapon.Uid.fromInt(weapon_uid_int).?;
+                            const weapon_index = std.mem.findScalar(
+                                logic.Properties.Weapon.Uid,
+                                &properties.weapon.uids,
+                                weapon_uid,
+                            ).?;
+
+                            weapon_list.appendAssumeCapacity(.{
+                                .uid = weapon_uid_int,
+                                .id = @intFromEnum(properties.weapon.ids[weapon_index]),
+                                .level = properties.weapon.levels[weapon_index].toInt(),
+                                .star = properties.weapon.stars[weapon_index].toInt(),
+                                .refine_level = properties.weapon.refines[weapon_index].toInt(),
+                            });
+                        }
                     };
 
                     break :dungeon_package_info .{
                         .avatar_list = avatar_list,
+                        .weapon_list = weapon_list,
                     };
                 },
             },
