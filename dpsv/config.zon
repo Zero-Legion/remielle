@@ -22,30 +22,30 @@
     },
 
     .versions = .{
-        .@"OSPRODWin3.0.0" = .{
+        .@"CNBetaWin3.1.2" = .{
             .servers = .{"remielle"},
             .cdn_conf = .{
                 .design_data = .{
-                    .data_revision = "16735318",
-                    .base_url = "https://autopatchos.zenlesszonezero.com/design_data/3.0_live/output_16735318_8a37288b67/client/",
+                    .data_revision = "16857772",
+                    .base_url = "https://autopatchcn.juequling.com/design_data/beta_live/output_16857772_4c0b267206/client/",
                     .md5_files =
-                    \\[{"fileName":"data_version","fileSize":6086,"fileMD5":"10650761489593377392"}]
+                    \\[{"fileName":"data_version","fileSize":5791,"fileMD5":"15240200554090624817"}]
                     ,
                 },
                 .game_res = .{
-                    .audio_revision = "16653444",
-                    .res_revision = "16735318",
-                    .base_url = "https://autopatchos.zenlesszonezero.com/game_res/3.0_live/output_16735318_8a37288b67/client/",
-                    .branch = "3.0_live",
+                    .audio_revision = "16817977",
+                    .res_revision = "16857772",
+                    .base_url = "https://autopatchcn.juequling.com/game_res/beta_live/output_16857772_4c0b267206/client/",
+                    .branch = "beta_live",
                     .md5_files =
-                    \\[{"fileName":"res_version","fileSize":2947517,"fileMD5":"14372005602392142486"},{"fileName":"audio_version","fileSize":90709,"fileMD5":"11768095642162315012"},{"fileName":"base_revision","fileSize":19,"fileMD5":"3615549357853315449"},{"fileName":"audio_diff_14184834-16229018_version","fileSize":36386,"fileMD5":"2032027434452048201"},{"fileName":"audio_diff_14925139-16229018_version","fileSize":25800,"fileMD5":"9084516106077158110"}]
+                    \\[{"fileName":"res_version","fileSize":2889434,"fileMD5":"15518598234293559955"},{"fileName":"audio_version","fileSize":67635,"fileMD5":"5438566495848743119"},{"fileName":"base_revision","fileSize":19,"fileMD5":"16483017214314018624"}]
                     ,
                 },
                 .silence_data = .{
-                    .silence_revision = "16735318",
-                    .base_url = "https://autopatchos.zenlesszonezero.com/design_data/3.0_live/output_16735318_8a37288b67/client_silence/",
+                    .silence_revision = "16855939",
+                    .base_url = "https://autopatchcn.juequling.com/design_data/beta_live/output_16857772_4c0b267206/client_silence/",
                     .md5_files =
-                    \\[{"fileName":"silence_version","fileSize":366,"fileMD5":"6743785767996354586"}]
+                    \\[{"fileName":"silence_version","fileSize":569,"fileMD5":"12646777207514848239"}]
                     ,
                 },
             },
