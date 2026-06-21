@@ -208,6 +208,39 @@ pub fn weaponDress(
     response.set(.init);
 }
 
+pub fn weaponUnDress(
+    message: Message(pb.WeaponUnDressCsReq),
+    properties: Properties.Immutable(.{
+        Properties.Avatar,
+    }),
+    changes: Changes.Builder(.{
+        Changes.Avatar,
+    }),
+    response: Response(pb.WeaponUnDressScRsp),
+) !void {
+    const maybe_index: ?u32 = avatar_index: {
+        const id = std.enums.fromInt(Properties.Avatar.Id, message.data.avatar_id) orelse
+            break :avatar_index null;
+
+        break :avatar_index properties.avatar.indexes.get(id);
+    };
+
+    const index = maybe_index orelse
+        return response.fail(1);
+
+    const avatars = try changes.allocator.alloc(Changes.Avatar, 1);
+
+    avatars[0] = .{
+        .id = properties.avatar.ids[index],
+        .meta = properties.avatar.meta[index],
+        .weapon_uid = .none, // undress
+        .equipment_uids = properties.avatar.equipment_uids[index],
+    };
+
+    changes.insert(avatars);
+    response.set(.init);
+}
+
 const Avatar = Properties.Avatar;
 const ArrayList = std.ArrayList;
 const templates = Assets.templates;

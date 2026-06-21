@@ -14253,6 +14253,12 @@ pub const WeaponUnDressCsReq = struct {
     avatar_id: u32 = 0,
 };
 
+pub const WeaponUnDressScRsp = struct {
+    pub const init: @This() = .{};
+    pub const pb_desc_name = "WeaponUnDressScRsp";
+    retcode: i32 = 0,
+};
+
 pub const CCCFJPLJBDH = struct {
     pub const init: @This() = .{};
     pub const pb_desc_name = "CCCFJPLJBDH";
