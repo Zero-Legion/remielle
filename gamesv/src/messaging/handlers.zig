@@ -7,6 +7,7 @@ const namespaces: []const type = &.{
     @import("handlers/quest.zig"),
     @import("handlers/misc.zig"),
     @import("handlers/scene.zig"),
+    @import("handlers/area_map.zig"),
 };
 
 const CmdId = CmdId: {
