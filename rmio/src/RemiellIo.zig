@@ -392,6 +392,8 @@ fn concurrent(
     if (@intFromPtr(stack_start) - @intFromPtr(coro.buffer.ptr) > coro.buffer.len)
         return error.ConcurrencyUnavailable;
 
+    errdefer comptime unreachable;
+
     coro.scheduling = .{ .awaitable = .{
         .start = start,
         .result_ptr = @ptrFromInt(buf_aligned),
@@ -430,36 +432,43 @@ fn cancel(
 
     const rio: *RemiellIo = @ptrCast(@alignCast(userdata));
     const coroutine: *Coroutine = @ptrCast(@alignCast(any_future));
+    rio.cancelAndWait(coroutine);
 
-    switch (coroutine.state) {
-        .running => {
-            coroutine.state = .cancel_requested;
+    @memcpy(result, @as([*]u8, @ptrCast(coroutine.scheduling.awaitable.result_ptr))[0..result.len]);
+    rio.coro_storage.recycle(coroutine);
+}
 
-            coroutine.awaiter = if (rio.current_coro) |current|
-                .{ .coroutine = current }
-            else
-                .{ .naked = &rio.naked_wait.context };
-
-            switch (coroutine.wait_point.awaitee) {
-                .operation => |*o| {
-                    o.outstanding += 1;
-                    o.cancelation.storage = .init(.{ .cancel = .{
-                        .operation = &o.primary.storage,
-                    } });
-
-                    rio.impl.submissions.append(&o.cancelation.storage.submission.node);
-                },
-                else => {},
-            }
-
-            rio.block(.{ .await = coroutine });
-        },
-        .finished => {}, // Nothing to do
+/// Puts a cancelation request on `coro` and waits until it finishes.
+fn cancelAndWait(rio: *RemiellIo, coro: *Coroutine) void {
+    switch (coro.state) {
+        .running => {},
+        .finished => return, // There's nothing to do
         .cancel_requested, .cancel_acknowledged => unreachable, // always a race condition
     }
 
-    rio.coro_storage.recycle(coroutine);
-    @memcpy(result, @as([*]u8, @ptrCast(coroutine.scheduling.awaitable.result_ptr))[0..result.len]);
+    coro.state = .cancel_requested;
+
+    coro.awaiter = if (rio.current_coro) |current|
+        .{ .coroutine = current }
+    else
+        .{ .naked = &rio.naked_wait.context };
+
+    switch (coro.wait_point.awaitee) {
+        .operation => |*o| {
+            // If it's blocked waiting on an `Operation`,
+            // submit a cancelation request for it.
+            o.outstanding += 1;
+            o.cancelation.storage = .init(.{ .cancel = .{
+                .operation = &o.primary.storage,
+            } });
+
+            rio.impl.submissions.append(&o.cancelation.storage.submission.node);
+        },
+        // TODO: should it propagate cancelation request?
+        .idle, .none, .coroutine => {},
+    }
+
+    rio.block(.{ .await = coro });
 }
 
 fn groupConcurrent(
@@ -538,32 +547,7 @@ fn groupCancel(
 
     while (g.token.raw) |token| {
         const coroutine: *Coroutine = @ptrCast(@alignCast(token));
-        switch (coroutine.state) {
-            .running => {
-                coroutine.state = .cancel_requested;
-
-                coroutine.awaiter = if (rio.current_coro) |current|
-                    .{ .coroutine = current }
-                else
-                    .{ .naked = &rio.naked_wait.context };
-
-                switch (coroutine.wait_point.awaitee) {
-                    .operation => |*o| {
-                        o.outstanding += 1;
-                        o.cancelation.storage = .init(.{ .cancel = .{
-                            .operation = &o.primary.storage,
-                        } });
-
-                        rio.impl.submissions.append(&o.cancelation.storage.submission.node);
-                    },
-                    else => {},
-                }
-
-                rio.block(.{ .await = coroutine });
-            },
-            .finished => {}, // Nothing to do
-            .cancel_requested, .cancel_acknowledged => unreachable, // always a race condition
-        }
+        rio.cancelAndWait(coroutine);
     }
 }
 
