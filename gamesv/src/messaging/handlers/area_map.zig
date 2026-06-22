@@ -9,7 +9,7 @@ pub fn getAreaMapData(
         templates.urban_area_map_group.entries.len,
     );
 
-    for (templates.urban_area_map_group.entries) |entry|
+    for (templates.urban_area_map_group.entries) |entry| if (entry.is_map_visible)
         groups.appendAssumeCapacity(.{
             .group_id = entry.area_group_id,
             .area_progress = 99,
