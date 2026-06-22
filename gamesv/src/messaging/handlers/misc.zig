@@ -25,6 +25,11 @@ pub fn getMiscData(
         templates.unlock_config.entries.len,
     );
 
+    var teleport_list: ArrayList(i32) = try .initCapacity(
+        response.allocator,
+        templates.teleport_config.entries.len,
+    );
+
     var post_girls: ArrayList(pb.PostGirlItem) = try .initCapacity(
         response.allocator,
         templates.post_girl_config.entries.len,
@@ -32,6 +37,9 @@ pub fn getMiscData(
 
     for (templates.unlock_config.entries) |config|
         unlocked_list.appendAssumeCapacity(@intCast(config.id));
+
+    for (templates.teleport_config.entries) |config|
+        teleport_list.appendAssumeCapacity(@intCast(config.teleport_id));
 
     for (templates.post_girl_config.entries) |config|
         post_girls.appendAssumeCapacity(.{ .id = config.id });
@@ -43,6 +51,7 @@ pub fn getMiscData(
 
     response.set(.{ .data = .{
         .unlock = .{ .unlocked_list = unlocked_list },
+        .teleport = .{ .unlocked_list = teleport_list },
         .post_girl = .{
             .post_girl_item_list = post_girls,
             .show_post_girl_id_list = show_post_girls,
