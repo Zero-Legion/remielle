@@ -6,6 +6,8 @@ pub const section_config = @import("templates/section_config.zig");
 pub const yorozuya_level = @import("templates/yorozuya_level.zig");
 pub const training_quest = @import("templates/training_quest.zig");
 pub const weapon = @import("templates/weapon.zig");
+pub const urban_area_map = @import("templates/urban_area_map.zig");
+pub const urban_area_map_group = @import("templates/urban_area_map_group.zig");
 
 pub const Property = struct {
     property: u32,

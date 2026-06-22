@@ -1,0 +1,67 @@
+.{
+    .{
+        .area_group_id = 98,
+        .group_name = "WorldMap_UrbanMapGroupName_CN_13",
+        .is_map_visible = true,
+    },
+    .{
+        .area_group_id = 99,
+        .group_name = "WorldMap_UrbanMapGroupName_CN_14",
+        .is_map_visible = true,
+    },
+    .{
+        .area_group_id = 100,
+        .group_name = "WorldMap_UrbanMapGroupName_CN_10",
+        .is_map_visible = true,
+    },
+    .{
+        .area_group_id = 101,
+        .group_name = "WorldMap_UrbanMapGroupName_CN_9",
+        .is_map_visible = true,
+    },
+    .{
+        .area_group_id = 102,
+        .group_name = "WorldMap_UrbanMapGroupName_CN_1",
+        .is_map_visible = true,
+    },
+    .{
+        .area_group_id = 103,
+        .group_name = "WorldMap_UrbanMapGroupName_CN_3",
+        .is_map_visible = true,
+    },
+    .{
+        .area_group_id = 104,
+        .group_name = "WorldMap_UrbanMapGroupName_CN_4",
+        .is_map_visible = true,
+    },
+    .{
+        .area_group_id = 105,
+        .group_name = "WorldMap_UrbanMapGroupName_CN_5",
+        .is_map_visible = true,
+    },
+    .{
+        .area_group_id = 106,
+        .group_name = "WorldMap_UrbanMapGroupName_CN_6",
+        .is_map_visible = false,
+    },
+    .{
+        .area_group_id = 107,
+        .group_name = "WorldMap_UrbanMapGroupName_CN_7",
+        .is_map_visible = false,
+    },
+    .{
+        .area_group_id = 108,
+        .group_name = "WorldMap_UrbanMapGroupName_CN_8",
+        .is_map_visible = true,
+    },
+    .{
+        .area_group_id = 109,
+        .group_name = "WorldMap_UrbanMapGroupName_CN_12",
+        .is_map_visible = true,
+    },
+    .{
+        .area_group_id = 110,
+        .group_name = "WorldMap_UrbanMapGroupName_MonsterFantasy_Map_Category",
+        .is_map_visible = false,
+    },
+}
