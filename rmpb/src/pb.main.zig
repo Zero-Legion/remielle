@@ -22031,6 +22031,12 @@ pub const EnterSectionCsReq = struct {
     tag: u32 = 0,
 };
 
+pub const EnterSectionScRsp = struct {
+    pub const init: @This() = .{};
+    pub const pb_desc_name = "EnterSectionScRsp";
+    retcode: i32 = 0,
+};
+
 pub const BusinessCardSync = struct {
     pub const init: @This() = .{};
     pub const pb_desc_name = "BusinessCardSync";
